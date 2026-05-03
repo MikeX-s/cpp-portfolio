@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Interactive WASM Portfolio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Syne+Mono&family=Syne:wght@700;800&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root {
+  --bg:      #05080d;
+  --surface: #0b1118;
+  --border:  #162030;
+  --border2: #1e3448;
+  --acc:     #f0c040;
+  --acc2:    #40c8f0;
+  --acc3:    #f04070;
+  --acc4:    #40f09c;
+  --text:    #d4e8f4;
+  --muted:   #3a5570;
+  --font-mono:'Syne Mono',monospace;
+  --font-disp:'Syne',sans-serif;
+}
+
+html,body{
+  width:100%;height:100%;
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--font-mono);
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  overflow:hidden;
+}
+
+/* ── Outer shell ── */
+#shell{
+  position:relative;
+  width:min(760px,98vw);
+  border:1px solid var(--border2);
+  border-radius:4px;overflow:hidden;
+  box-shadow:0 0 0 1px #000,0 0 50px rgba(64,200,240,.08);
+}
+
+/* ── Top bar ── */
+#topbar{
+  display:flex;align-items:center;
+  padding:0 14px;height:42px;
+  background:var(--surface);
+  border-bottom:1px solid var(--border2);
+  gap:12px;
+}
+.brand{
+  font-family:var(--font-disp);font-size:13px;font-weight:800;
+  color:var(--acc);letter-spacing:.16em;text-transform:uppercase;
+  white-space:nowrap;text-shadow:0 0 14px var(--acc);
+}
+.sep{flex:1}
+.hud-pill{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
+.hud-pill .lbl{font-size:8px;color:var(--muted);letter-spacing:.12em}
+.hud-pill .val{
+  font-family:var(--font-disp);font-size:15px;font-weight:800;
+  color:var(--acc4);text-shadow:0 0 8px var(--acc4);letter-spacing:.04em;
+}
+#hud-hi .val{color:var(--acc);text-shadow:0 0 8px var(--acc)}
+.hdiv{width:1px;height:22px;background:var(--border2)}
+
+#repos-badge{
+  display:flex;align-items:center;gap:7px;
+  padding:3px 10px;
+  border:1px solid var(--acc4);border-radius:2px;
+  font-size:10px;color:var(--acc4);letter-spacing:.08em;
+}
+#repos-badge .dot{
+  width:6px;height:6px;border-radius:50%;
+  background:var(--acc4);box-shadow:0 0 6px var(--acc4);
+}
+
+/* ── Speed line ── */
+#speed-line{height:2px;background:var(--surface);overflow:hidden}
+#speed-fill{
+  height:100%;width:0%;
+  background:linear-gradient(90deg,var(--acc4),var(--acc2));
+  transition:width .3s;box-shadow:0 0 6px var(--acc2);
+}
+
+/* ── Canvas ── */
+#canvas{display:block;width:100%;background:var(--bg);image-rendering:pixelated}
+
+/* ── Bottom bar ── */
+#botbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;height:34px;
+  background:var(--surface);border-top:1px solid var(--border2);
+  font-size:10px;color:var(--muted);letter-spacing:.06em;
+}
+#botbar .keys{display:flex;gap:12px}
+.key{background:var(--border2);color:var(--text);border-radius:2px;padding:1px 6px;font-size:9px}
+#wasm-pill{display:flex;align-items:center;gap:6px}
+#wasm-dot{
+  width:7px;height:7px;border-radius:50%;
+  background:var(--acc3);box-shadow:0 0 6px var(--acc3);transition:all .4s;
+}
+#wasm-dot.live{background:var(--acc4);box-shadow:0 0 6px var(--acc4)}
+
+/* ── OVERLAY ── */
+#overlay{
+  position:absolute;inset:0;z-index:30;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  background:rgba(5,8,13,.9);backdrop-filter:blur(3px);
+  transition:opacity .35s;gap:6px;
+}
+#overlay.hidden{opacity:0;pointer-events:none}
+
+.ov-tag{font-size:9px;color:var(--muted);letter-spacing:.2em;margin-bottom:2px}
+#ov-title{
+  font-family:var(--font-disp);font-size:clamp(20px,5vw,34px);font-weight:800;
+  letter-spacing:.14em;color:var(--acc);
+  text-shadow:0 0 30px var(--acc),0 0 80px rgba(240,192,64,.3);
+  text-transform:uppercase;animation:flicker 4s infinite;text-align:center;
+}
+#ov-title.death{color:var(--acc3);text-shadow:0 0 30px var(--acc3)}
+.tagline{
+  font-size:11px;color:var(--muted);letter-spacing:.1em;
+  text-align:center;max-width:380px;line-height:1.75;margin:4px 0 10px;
+}
+.ov-stats{
+  display:flex;gap:24px;padding:10px 20px;
+  border:1px solid var(--border2);border-radius:3px;margin-bottom:6px;
+}
+.ov-stat{text-align:center}
+.ov-stat .sv{
+  font-family:var(--font-disp);font-size:20px;font-weight:800;
+  color:var(--acc4);text-shadow:0 0 10px var(--acc4);
+}
+.ov-stat .sk{font-size:9px;color:var(--muted);letter-spacing:.1em}
+
+#cta-btn{
+  margin-top:10px;padding:10px 36px;
+  font-family:var(--font-disp);font-size:13px;font-weight:800;
+  letter-spacing:.18em;text-transform:uppercase;
+  background:var(--acc);color:var(--bg);
+  border:none;border-radius:2px;cursor:pointer;
+  box-shadow:0 0 22px rgba(240,192,64,.5);
+  transition:transform .1s,box-shadow .15s;
+}
+#cta-btn:hover{transform:scale(1.04);box-shadow:0 0 36px rgba(240,192,64,.7)}
+#cta-btn:active{transform:scale(.97)}
+#cta-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.ov-note{
+  font-size:9px;color:var(--muted);letter-spacing:.12em;
+  margin-top:10px;border:1px solid var(--border);
+  padding:3px 14px;border-radius:2px;text-align:center;
+}
+
+/* ── REPO CARD ── */
+#repo-card{
+  position:absolute;left:50%;bottom:0;
+  transform:translateX(-50%) translateY(110%);
+  width:min(500px,94%);
+  background:var(--surface);
+  border:1px solid var(--acc4);border-bottom:none;
+  border-radius:4px 4px 0 0;
+  padding:20px 22px 18px;z-index:25;
+  box-shadow:0 -8px 50px rgba(64,240,156,.12),0 0 0 1px rgba(64,240,156,.04);
+  transition:transform .45s cubic-bezier(.16,1,.3,1);
+}
+#repo-card.visible{transform:translateX(-50%) translateY(0)}
+.rc-header{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  margin-bottom:10px;gap:10px;
+}
+.rc-name{
+  font-family:var(--font-disp);font-size:18px;font-weight:800;
+  color:var(--acc4);text-shadow:0 0 12px rgba(64,240,156,.4);
+  letter-spacing:.04em;word-break:break-all;
+}
+.rc-lang-badge{
+  flex-shrink:0;font-size:9px;letter-spacing:.12em;
+  padding:2px 8px;border-radius:2px;
+  background:rgba(64,200,240,.1);border:1px solid var(--acc2);
+  color:var(--acc2);white-space:nowrap;
+}
+.rc-desc{
+  font-size:12px;color:var(--text);line-height:1.7;
+  margin-bottom:12px;opacity:.9;
+}
+.rc-meta{
+  display:flex;gap:16px;flex-wrap:wrap;
+  font-size:10px;color:var(--muted);letter-spacing:.06em;margin-bottom:14px;
+}
+.rc-meta .icon{color:var(--acc);font-size:11px}
+.rc-actions{display:flex;gap:10px;align-items:center}
+.rc-btn-primary{
+  flex:1;padding:9px;
+  font-family:var(--font-disp);font-size:11px;font-weight:800;
+  letter-spacing:.14em;text-transform:uppercase;
+  background:var(--acc4);color:var(--bg);
+  border:none;border-radius:2px;cursor:pointer;
+  text-decoration:none;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 14px rgba(64,240,156,.3);transition:box-shadow .15s;
+}
+.rc-btn-primary:hover{box-shadow:0 0 24px rgba(64,240,156,.5)}
+.rc-btn-secondary{
+  padding:9px 16px;font-size:11px;letter-spacing:.1em;
+  background:transparent;color:var(--muted);
+  border:1px solid var(--border2);border-radius:2px;
+  cursor:pointer;font-family:var(--font-mono);
+  transition:color .15s,border-color .15s;
+}
+.rc-btn-secondary:hover{color:var(--text);border-color:var(--muted)}
+.rc-collected-bar{
+  margin-top:14px;padding-top:12px;
+  border-top:1px solid var(--border);
+  display:flex;gap:6px;flex-wrap:wrap;min-height:20px;
+}
+.rc-chip{
+  font-size:9px;color:var(--acc4);
+  border:1px solid rgba(64,240,156,.3);
+  padding:2px 7px;border-radius:2px;letter-spacing:.06em;
+}
+
+/* ── GitHub prompt ── */
+#gh-prompt{
+  position:absolute;inset:0;z-index:40;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(5,8,13,.96);
+  flex-direction:column;gap:14px;
+  transition:opacity .3s;
+}
+#gh-prompt.hidden{opacity:0;pointer-events:none}
+#gh-prompt h2{
+  font-family:var(--font-disp);font-size:18px;font-weight:800;
+  color:var(--acc);letter-spacing:.14em;
+}
+#gh-prompt p{
+  font-size:11px;color:var(--muted);letter-spacing:.08em;
+  text-align:center;max-width:340px;line-height:1.75;
+}
+#gh-form{display:flex;gap:8px;align-items:center;width:300px}
+#gh-input{
+  flex:1;padding:9px 12px;
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:2px;color:var(--text);
+  font-family:var(--font-mono);font-size:13px;
+  outline:none;transition:border-color .15s;
+}
+#gh-input:focus{border-color:var(--acc)}
+#gh-submit{
+  padding:9px 16px;background:var(--acc);color:var(--bg);
+  font-family:var(--font-disp);font-size:11px;font-weight:800;
+  letter-spacing:.12em;border:none;border-radius:2px;cursor:pointer;
+}
+#gh-submit:hover{filter:brightness(1.1)}
+#gh-err{font-size:10px;color:var(--acc3);letter-spacing:.08em;display:none}
+#gh-loading{font-size:10px;color:var(--muted);letter-spacing:.1em;display:none}
+.gh-demo{font-size:9px;color:var(--muted);letter-spacing:.1em}
+.gh-demo a{color:var(--acc2);cursor:pointer;text-decoration:underline}
+
+/* ── Scanlines ── */
+#scanlines{
+  position:absolute;inset:0;pointer-events:none;z-index:50;border-radius:4px;
+  background:repeating-linear-gradient(
+    to bottom,transparent 0px,transparent 3px,rgba(0,0,0,.09) 3px,rgba(0,0,0,.09) 4px
+  );
+}
+
+@keyframes flicker{
+  0%,100%{opacity:1}93%{opacity:1}94%{opacity:.5}95%{opacity:1}97%{opacity:.7}98%{opacity:1}
+}
+</style>
+</head>
+<body>
+
+<!-- GitHub username gate -->
+<div id="gh-prompt">
+  <h2>WASM PORTFOLIO</h2>
+  <p>Enter your GitHub username to load your repositories as in-game collectibles.</p>
+  <div id="gh-form">
+    <input id="gh-input" value="MikeX-s" placeholder="MikeX-s" autocomplete="off" spellcheck="false"/>
+    <button id="gh-submit">LOAD</button>
+  </div>
+  <div id="gh-err">Could not fetch repos — check the username.</div>
+  <div id="gh-loading">Fetching repositories…</div>
+  <div class="gh-demo">see <a id="readme-link" target="_blank" rel="noopener noreferrer">README</a></div>
+</div>
+
+<div id="shell">
+  <div id="scanlines"></div>
+
+  <div id="topbar">
+    <span class="brand" id="portfolio-name">WASM PORTFOLIO</span>
+    <div class="sep"></div>
+    <div id="repos-badge"><div class="dot"></div><span id="collected-count">0</span>&nbsp;REPOS</div>
+    <div class="hdiv"></div>
+    <div class="hud-pill" id="hud-hi"><div class="lbl">HI-SCORE</div><div class="val" id="hi-val">000000</div></div>
+    <div class="hdiv"></div>
+    <div class="hud-pill"><div class="lbl">SCORE</div><div class="val" id="score-val">000000</div></div>
+  </div>
+  <div id="speed-line"><div id="speed-fill"></div></div>
+
+  <canvas id="canvas" width="760" height="340"></canvas>
+
+  <!-- Repo info card (slides up from bottom) -->
+  <div id="repo-card">
+    <div class="rc-header">
+      <div class="rc-name" id="rc-name">repo-name</div>
+      <div class="rc-lang-badge" id="rc-lang">C++</div>
+    </div>
+    <div class="rc-desc" id="rc-desc">Description.</div>
+    <div class="rc-meta">
+      <span><span class="icon">★</span><span id="rc-stars">0</span></span>
+      <span><span class="icon">⑂</span><span id="rc-forks">0</span></span>
+      <span><span class="icon">◉</span><span id="rc-issues">0</span></span>
+      <span id="rc-updated"></span>
+    </div>
+    <div class="rc-actions">
+      <a id="rc-link" href="#" target="_blank" rel="noopener" class="rc-btn-primary">VIEW ON GITHUB →</a>
+      <button class="rc-btn-secondary" id="rc-continue">CONTINUE RUN ▶</button>
+    </div>
+    <div class="rc-collected-bar" id="rc-chips"></div>
+  </div>
+
+  <!-- Start / Death overlay -->
+  <div id="overlay">
+    <div class="ov-tag">C++20 · WEBASSEMBLY · EMSCRIPTEN · GITHUB API</div>
+    <h1 id="ov-title">WASM PORTFOLIO</h1>
+    <p class="tagline" id="ov-tagline">
+      A gamified way to explore my repositories.<br/>
+      Run, jump, and collect every project to read about it.
+    </p>
+    <div class="ov-stats" id="ov-stats" style="display:none">
+      <div class="ov-stat"><div class="sv" id="ov-score">0</div><div class="sk">SCORE</div></div>
+      <div class="ov-stat"><div class="sv" id="ov-repos">0</div><div class="sk">REPOS FOUND</div></div>
+      <div class="ov-stat"><div class="sv" id="ov-speed">0x</div><div class="sk">MAX SPEED</div></div>
+    </div>
+    <button id="cta-btn" disabled>LOADING…</button>
+    <div class="ov-note" id="ov-note">SPACE · ↑ · TAP — jump &nbsp;|&nbsp; DOUBLE JUMP supported</div>
+  </div>
+
+  <div id="botbar">
+    <div class="keys">
+      <span><span class="key">SPACE</span> jump</span>
+      <span><span class="key">↑ / W</span> jump</span>
+      <span><span class="key">TAP</span> jump</span>
+    </div>
+    <div id="wasm-pill"><div id="wasm-dot"></div><span id="wasm-txt">WASM LOADING</span></div>
+  </div>
+</div>
+
+<script src="game.js" integrity="sha384-REPLACE_WITH_GAME_JS_HASH" crossorigin="anonymous"></script>
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════
+//  SRI CONFIG — update hashes after every build
+//  Generate: openssl dgst -sha384 -binary <file> | openssl base64 -A
+// ═══════════════════════════════════════════════════════════
+const SRI = {
+  wasmHash: 'sha384-REPLACE_WITH_GAME_WASM_HASH',
+};
+
+// ═══════════════════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════════════════
+const CFG = {
+  maxRepos: 20,
+  repoSpacing: 950,    // px between repo collectibles
+  firstRepoAt: 550,    // first one appears after this world distance
+};
+
+// ═══════════════════════════════════════════════════════════
+//  DOM REFS
+// ═══════════════════════════════════════════════════════════
+const canvas    = document.getElementById('canvas');
+const ctx       = canvas.getContext('2d');
+const overlay   = document.getElementById('overlay');
+const ovTitle   = document.getElementById('ov-title');
+const ovTagline = document.getElementById('ov-tagline');
+const ovStats   = document.getElementById('ov-stats');
+const ovScore   = document.getElementById('ov-score');
+const ovRepos   = document.getElementById('ov-repos');
+const ovSpeedEl = document.getElementById('ov-speed');
+const ctaBtn    = document.getElementById('cta-btn');
+const ovNote    = document.getElementById('ov-note');
+const scoreEl   = document.getElementById('score-val');
+const hiEl      = document.getElementById('hi-val');
+const speedFill = document.getElementById('speed-fill');
+const wasmDot   = document.getElementById('wasm-dot');
+const wasmTxt   = document.getElementById('wasm-txt');
+const collCount = document.getElementById('collected-count');
+const portName  = document.getElementById('portfolio-name');
+const repoCard  = document.getElementById('repo-card');
+const rcName    = document.getElementById('rc-name');
+const rcLang    = document.getElementById('rc-lang');
+const rcDesc    = document.getElementById('rc-desc');
+const rcStars   = document.getElementById('rc-stars');
+const rcForks   = document.getElementById('rc-forks');
+const rcIssues  = document.getElementById('rc-issues');
+const rcUpdated = document.getElementById('rc-updated');
+const rcLink    = document.getElementById('rc-link');
+const rcContinue= document.getElementById('rc-continue');
+const rcChips   = document.getElementById('rc-chips');
+const ghPrompt  = document.getElementById('gh-prompt');
+const ghInput   = document.getElementById('gh-input');
+const ghSubmit  = document.getElementById('gh-submit');
+const ghErr     = document.getElementById('gh-err');
+const ghLoading = document.getElementById('gh-loading');
+
+// ═══════════════════════════════════════════════════════════
+//  RUNTIME STATE
+// ═══════════════════════════════════════════════════════════
+let gm         = null;
+let wasmReady  = false;
+let rafId      = null;
+let paused     = false;
+let allRepos   = [];
+let repoPickups= [];
+let collected  = [];
+let maxSpeed   = 4.5;
+let activeCard = null;
+let frame      = 0;
+let jsBursts   = [];
+
+const CW = 760, CH = 340;
+
+// ═══════════════════════════════════════════════════════════
+//  PALETTE
+// ═══════════════════════════════════════════════════════════
+const C = {
+  bg:'#05080d', surface:'#0b1118', border:'#162030', border2:'#1e3448',
+  acc:'#f0c040', acc2:'#40c8f0', acc3:'#f04070', acc4:'#40f09c',
+  text:'#d4e8f4', muted:'#3a5570',
+  obs:['#f04070','#ffc840','#a040f0'],
+};
+
+const LANG_COL = {
+  'C++':'#40c8f0','C':'#3498db','Rust':'#f04070','Go':'#40f09c',
+  'Python':'#f0c040','JavaScript':'#f0d040','TypeScript':'#40b8f0',
+  'Java':'#f08040','Kotlin':'#a040f0','Swift':'#f05030',
+  'HTML':'#f04070','CSS':'#4080f0','Shell':'#40f09c',
+};
+const lc = lang => LANG_COL[lang] || '#8888aa';
+
+// Parallax star field
+const STARS = Array.from({length:90}, () => ({
+  x:Math.random()*CW, y:Math.random()*(CH*.74),
+  r:Math.random()*1.3+.3, spd:Math.random()*.7+.15,
+  a:Math.random()*.55+.15,
+}));
+
+// ═══════════════════════════════════════════════════════════
+//  GITHUB API
+// ═══════════════════════════════════════════════════════════
+async function fetchRepos(username) {
+  ghErr.style.display = 'none';
+  ghLoading.style.display = 'block';
+  ghSubmit.disabled = true;
+  try {
+    const res = await fetch(
+      `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated&per_page=100`
+    );
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    if (!Array.isArray(data) || data.message) throw new Error('bad response');
+    allRepos = data
+      .filter(r => !r.fork)
+      .sort((a, b) => b.stargazers_count - a.stargazers_count)
+      .slice(0, CFG.maxRepos);
+    if (allRepos.length === 0) throw new Error('no public repos');
+    return true;
+  } catch (e) {
+    ghErr.style.display = 'block';
+    return false;
+  } finally {
+    ghLoading.style.display = 'none';
+    ghSubmit.disabled = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  WASM BOOTSTRAP
+// ═══════════════════════════════════════════════════════════
+async function verifyWasmIntegrity(buffer, expectedHash) {
+  try {
+    const [algorithm] = expectedHash.split('-');
+    const algoName = algorithm.replace('sha', 'SHA-').toUpperCase();
+    const hashBuffer = await crypto.subtle.digest(algoName, buffer);
+    const hashArray  = Array.from(new Uint8Array(hashBuffer));
+    const hashBase64 = btoa(String.fromCharCode(...hashArray));
+    const actual     = algorithm + '-' + hashBase64;
+    if (actual !== expectedHash) {
+      throw new Error(`[SRI] Hash mismatch!\n  expected: ${expectedHash}\n  actual:   ${actual}`);
+    }
+    console.info('[SRI] game.wasm integrity check passed ✓');
+    return true;
+  } catch (e) {
+    console.error(e.message || e);
+    return false;
+  }
+}
+
+async function loadWasm() {
+  if (typeof GameModule === 'undefined') {
+    wasmTxt.textContent = 'WASM NOT FOUND';
+    console.error('[WASM] game.js not found — make sure game.js and game.wasm are deployed.');
+    return;
+  }
+
+  const _origInstantiateStreaming = WebAssembly.instantiateStreaming;
+  const _origInstantiate         = WebAssembly.instantiate;
+
+  WebAssembly.instantiateStreaming = async (source, imports) => {
+    try {
+      const response = source instanceof Promise ? await source : source;
+      const buffer   = await response.arrayBuffer();
+
+      if (!SRI.wasmHash.includes('REPLACE_WITH')) {
+        const ok = await verifyWasmIntegrity(buffer, SRI.wasmHash);
+        if (!ok) {
+          wasmTxt.textContent = 'WASM TAMPERED';
+          wasmDot.style.background = 'var(--acc3)';
+          throw new Error('[SRI] Integrity check failed — refusing to run tampered Wasm.');
+        }
+      } else {
+        console.warn('[SRI] Skipping Wasm hash check — placeholder not replaced yet.');
+      }
+
+      return _origInstantiate(buffer, imports);
+    } catch (e) {
+      WebAssembly.instantiateStreaming = _origInstantiateStreaming;
+      WebAssembly.instantiate         = _origInstantiate;
+      throw e;
+    }
+  };
+
+  GameModule()
+    .then(m => {
+      WebAssembly.instantiateStreaming = _origInstantiateStreaming;
+      WebAssembly.instantiate         = _origInstantiate;
+      gm = m; onWasmReady();
+    })
+    .catch(err => {
+      WebAssembly.instantiateStreaming = _origInstantiateStreaming;
+      WebAssembly.instantiate         = _origInstantiate;
+      console.error('[WASM]', err);
+      wasmTxt.textContent = 'WASM FAILED';
+    });
+}
+
+function onWasmReady() {
+  wasmReady = true;
+  wasmDot.classList.add('live');
+  wasmTxt.textContent = 'WASM READY';
+  ctaBtn.disabled = false;
+  ctaBtn.textContent = 'START RUN';
+  startLoop();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PICKUP SETUP
+// ═══════════════════════════════════════════════════════════
+function buildPickups() {
+  repoPickups = allRepos.map((repo, i) => ({
+    worldX: CFG.firstRepoAt + i * CFG.repoSpacing,
+    repo,
+    collected: false,
+    phase: Math.random() * Math.PI * 2,
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PICKUP COLLISION CHECK (called each frame)
+// ═══════════════════════════════════════════════════════════
+function checkPickups() {
+  if (!gm.isStarted() || !gm.isAlive() || paused) return;
+  const wx = gm.getWorldX();
+  const px = gm.getPlayerX();
+
+  for (const p of repoPickups) {
+    if (p.collected) continue;
+    const sx = p.worldX - wx + px;
+    if (sx > -40 && sx < 70) {
+      p.collected = true;
+      collected.push(p.repo);
+      collCount.textContent = collected.length;
+      spawnBurst(px + 16, gm.getGroundY() - 70);
+      showRepoCard(p.repo);
+      break;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  JS BURST PARTICLES (pickup effect — purely in JS)
+// ═══════════════════════════════════════════════════════════
+function spawnBurst(x, y) {
+  for (let i = 0; i < 22; i++) {
+    jsBursts.push({
+      x, y,
+      vx: (Math.random() - .5) * 7,
+      vy: (Math.random() - .5) * 7 - 2,
+      life: 30 + Math.random() * 20,
+      ml: 50,
+      hue: 140 + Math.random() * 40,
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  REPO CARD
+// ═══════════════════════════════════════════════════════════
+function showRepoCard(repo) {
+  paused = true;
+  activeCard = repo;
+
+  const col = lc(repo.language);
+  rcName.textContent = repo.name;
+  rcLang.textContent = repo.language || 'N/A';
+  rcLang.style.borderColor = col;
+  rcLang.style.color = col;
+  rcDesc.textContent = repo.description || 'No description provided.';
+  rcStars.textContent = repo.stargazers_count;
+  rcForks.textContent = repo.forks_count;
+  rcIssues.textContent = repo.open_issues_count;
+  const d = new Date(repo.updated_at);
+  rcUpdated.textContent = `Updated ${d.toLocaleDateString('en',{month:'short',year:'numeric'})}`;
+  rcLink.href = repo.html_url;
+
+  // Previously collected chips
+  rcChips.innerHTML = '';
+  if (collected.length > 1) {
+    const lbl = document.createElement('span');
+    lbl.style.cssText = 'font-size:9px;color:var(--muted);letter-spacing:.1em;width:100%;margin-bottom:4px;';
+    lbl.textContent = 'ALSO COLLECTED:';
+    rcChips.appendChild(lbl);
+    collected.slice(0, -1).slice(-8).forEach(r => {
+      const c = document.createElement('span');
+      c.className = 'rc-chip';
+      c.textContent = r.name;
+      rcChips.appendChild(c);
+    });
+  }
+
+  repoCard.classList.add('visible');
+}
+
+function closeRepoCard() {
+  repoCard.classList.remove('visible');
+  activeCard = null;
+  setTimeout(() => { paused = false; }, 460);
+}
+
+rcContinue.addEventListener('click', closeRepoCard);
+
+// ═══════════════════════════════════════════════════════════
+//  DRAW HELPERS
+// ═══════════════════════════════════════════════════════════
+function rr(ctx, x, y, w, h, r) {
+  // rounded rect path
+  const tl = typeof r === 'number' ? r : (r.tl||0);
+  const tr = typeof r === 'number' ? r : (r.tr||0);
+  const br = typeof r === 'number' ? r : (r.br||0);
+  const bl = typeof r === 'number' ? r : (r.bl||0);
+  ctx.beginPath();
+  ctx.moveTo(x+tl,y);
+  ctx.lineTo(x+w-tr,y); ctx.quadraticCurveTo(x+w,y,x+w,y+tr);
+  ctx.lineTo(x+w,y+h-br); ctx.quadraticCurveTo(x+w,y+h,x+w-br,y+h);
+  ctx.lineTo(x+bl,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-bl);
+  ctx.lineTo(x,y+tl); ctx.quadraticCurveTo(x,y,x+tl,y);
+  ctx.closePath();
+}
+
+function drawStars(speed) {
+  for (const s of STARS) {
+    if (!paused) { s.x -= s.spd * (speed / 4.5); if (s.x < 0) s.x = CW; }
+    ctx.globalAlpha = s.a;
+    ctx.fillStyle = C.text;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawGround(groundY) {
+  const GH = CH - groundY;
+  ctx.fillStyle = C.surface; ctx.fillRect(0, groundY, CW, GH);
+  ctx.strokeStyle = C.acc2; ctx.lineWidth = 1.5;
+  ctx.shadowColor = C.acc2; ctx.shadowBlur = 10;
+  ctx.beginPath(); ctx.moveTo(0,groundY); ctx.lineTo(CW,groundY); ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = C.border2; ctx.lineWidth = .5;
+  for (let i = 0; i < 3; i++) {
+    const tx = gm.getGroundTile(i);
+    for (let row = 1; row <= 2; row++) {
+      ctx.beginPath();
+      ctx.moveTo(Math.max(0,tx), groundY + row*(GH/3));
+      ctx.lineTo(Math.min(CW,tx+780), groundY + row*(GH/3));
+      ctx.stroke();
+    }
+    if (tx > 0 && tx < CW) {
+      ctx.beginPath(); ctx.moveTo(tx,groundY); ctx.lineTo(tx,CH); ctx.stroke();
+    }
+  }
+}
+
+function drawObstacle(x, y, w, h, type) {
+  const col = C.obs[type] || C.acc3;
+  ctx.fillStyle = col + '20'; ctx.fillRect(x,y,w,h);
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+  ctx.shadowColor = col; ctx.shadowBlur = 10;
+  ctx.strokeRect(x,y,w,h); ctx.shadowBlur = 0;
+  ctx.fillStyle = col;
+  ctx.font = '8px "Syne Mono",monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(['BLOCK','LOW','HIGH'][type]||'?', x+w/2, y+h/2+3);
+  ctx.textAlign = 'left';
+}
+
+// Floating repo collectible icon
+function drawPickups(groundY, worldX, playerX) {
+  const IH = 56;
+  for (const p of repoPickups) {
+    if (p.collected) continue;
+    const sx = p.worldX - worldX + playerX;
+    if (sx < -90 || sx > CW + 90) continue;
+
+    const bob = groundY - IH - 8 + Math.sin(frame*.055 + p.phase) * 5;
+    const col = lc(p.repo.language);
+
+    // Vertical glow column to ground
+    const grd = ctx.createLinearGradient(sx+20, groundY-IH-24, sx+20, groundY);
+    grd.addColorStop(0, 'rgba(64,240,156,0)');
+    grd.addColorStop(.5, 'rgba(64,240,156,.07)');
+    grd.addColorStop(1, 'rgba(64,240,156,.02)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(sx+4, groundY-IH-24, 32, IH+24);
+
+    // Card shadow
+    ctx.shadowColor = C.acc4; ctx.shadowBlur = 16;
+
+    // Card body
+    ctx.fillStyle = C.surface; rr(ctx,sx,bob,40,IH,3); ctx.fill();
+    ctx.strokeStyle = C.acc4; ctx.lineWidth = 1.2;
+    rr(ctx,sx,bob,40,IH,3); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Language colour bar on top
+    ctx.fillStyle = col;
+    rr(ctx,sx,bob,40,7,{tl:3,tr:3,bl:0,br:0}); ctx.fill();
+
+    // Repo initial (large)
+    ctx.fillStyle = C.acc4;
+    ctx.font = 'bold 17px "Syne",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = C.acc4; ctx.shadowBlur = 8;
+    ctx.fillText(p.repo.name[0].toUpperCase(), sx+20, bob+32);
+    ctx.shadowBlur = 0;
+
+    // Stars count
+    ctx.fillStyle = C.acc;
+    ctx.font = '8px "Syne Mono",monospace';
+    ctx.fillText(`★${p.repo.stargazers_count}`, sx+20, bob+46);
+    ctx.textAlign = 'left';
+
+    // "COLLECT" label above card
+    ctx.globalAlpha = .65 + Math.sin(frame*.08+p.phase)*.35;
+    ctx.fillStyle = C.acc4;
+    ctx.font = '7px "Syne Mono",monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('COLLECT', sx+20, bob-7);
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
+}
+
+function drawPlayer(px, py, pw, ph, anim, onGround) {
+  const cx = px + pw/2;
+  if (onGround) {
+    ctx.fillStyle = 'rgba(64,200,240,.08)';
+    ctx.beginPath(); ctx.ellipse(cx, py+ph+2, pw*.7, 4, 0, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.shadowColor = C.acc2; ctx.shadowBlur = 22;
+  ctx.fillStyle = C.acc2+'bb'; ctx.fillRect(px+6, py+10, pw-12, ph-18);
+  ctx.fillStyle = C.acc2;
+  ctx.beginPath(); ctx.arc(cx, py+8, 8, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = C.bg;
+  ctx.beginPath(); ctx.arc(cx+3, py+7, 2.5, 0, Math.PI*2); ctx.fill();
+  const ls = Math.sin(anim*Math.PI*2)*6;
+  ctx.strokeStyle = C.acc2; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(cx-5,py+ph-8); ctx.lineTo(cx-5+ls,py+ph); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx+5,py+ph-8); ctx.lineTo(cx+5-ls,py+ph); ctx.stroke();
+  ctx.shadowBlur = 0;
+}
+
+function drawWasmParticles() {
+  const n = gm.getParticleCount();
+  for (let i = 0; i < n; i++) {
+    const life = gm.getParticleLife(i);
+    const r=gm.getParticleR(i),g=gm.getParticleG(i),b=gm.getParticleB(i);
+    ctx.globalAlpha = life;
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.shadowColor = `rgb(${r},${g},${b})`; ctx.shadowBlur = 8;
+    const sz = 3*life+1;
+    ctx.fillRect(gm.getParticleX(i)-sz/2, gm.getParticleY(i)-sz/2, sz, sz);
+  }
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+}
+
+function drawJsBursts() {
+  for (const p of jsBursts) {
+    ctx.globalAlpha = p.life/p.ml;
+    ctx.fillStyle = `hsl(${p.hue},80%,65%)`;
+    ctx.shadowColor = `hsl(${p.hue},80%,65%)`; ctx.shadowBlur = 6;
+    ctx.fillRect(p.x-2, p.y-2, 4, 4);
+  }
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  jsBursts.forEach(p => { p.x+=p.vx; p.y+=p.vy; p.vy+=.15; p.life--; });
+  jsBursts = jsBursts.filter(p => p.life > 0);
+}
+
+function drawProgress(worldX, px) {
+  const total = repoPickups.length;
+  const left  = repoPickups.filter(p => !p.collected && p.worldX > worldX).length;
+
+  ctx.font = '8px "Syne Mono",monospace';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = C.muted;
+  ctx.fillText(`${collected.length}/${total} repos`, CW-12, 18);
+
+  if (total > 0 && left === 0) {
+    ctx.fillStyle = C.acc4; ctx.globalAlpha = .8;
+    ctx.font = 'bold 10px "Syne",sans-serif';
+    ctx.fillText('ALL REPOS COLLECTED!', CW-12, 32);
+    ctx.globalAlpha = 1;
+  } else {
+    const next = repoPickups.find(p => !p.collected && p.worldX > worldX);
+    if (next) {
+      const dist = Math.max(0, Math.floor((next.worldX - worldX) / 10));
+      if (dist < 250) {
+        ctx.globalAlpha = .55 + Math.sin(frame*.1)*.45;
+        ctx.fillStyle = C.acc4;
+        ctx.fillText(`▶ ${next.repo.name} in ${dist}m`, CW-12, 32);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+  ctx.textAlign = 'left';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MAIN LOOP
+// ═══════════════════════════════════════════════════════════
+function render(ts) {
+  rafId = requestAnimationFrame(render);
+  frame++;
+
+  const started = wasmReady && gm.isStarted();
+  const alive   = wasmReady && gm.isAlive();
+
+  if (started && alive && !paused) gm.update();
+  if (started && alive) checkPickups();
+
+  const groundY = wasmReady ? gm.getGroundY() : 300;
+  const px      = wasmReady ? gm.getPlayerX() : 120;
+  const py      = wasmReady ? gm.getPlayerY() : groundY-40;
+  const pw      = wasmReady ? gm.getPlayerW() : 32;
+  const ph      = wasmReady ? gm.getPlayerH() : 40;
+  const anim    = wasmReady ? gm.getAnimTimer() : 0;
+  const onGnd   = wasmReady ? gm.isOnGround() : true;
+  const speed   = wasmReady ? gm.getScrollSpeed() : 4.5;
+  const score   = wasmReady ? gm.getScore() : 0;
+  const hi      = wasmReady ? gm.getHiScore() : 0;
+  const worldX  = wasmReady ? gm.getWorldX() : 0;
+  const nObs    = wasmReady ? gm.getObstacleCount() : 0;
+
+  if (speed > maxSpeed) maxSpeed = speed;
+
+  // Clear
+  ctx.clearRect(0,0,CW,CH);
+  ctx.fillStyle = C.bg; ctx.fillRect(0,0,CW,CH);
+
+  // Sky gradient
+  const sky = ctx.createLinearGradient(0,0,0,groundY);
+  sky.addColorStop(0,'#04060b'); sky.addColorStop(1,'#0b1a26');
+  ctx.fillStyle = sky; ctx.fillRect(0,0,CW,groundY);
+
+  drawStars(started ? speed : 2);
+  if (wasmReady) drawGround(groundY);
+  if (started) drawPickups(groundY, worldX, px);
+  for (let i = 0; i < nObs; i++)
+    drawObstacle(gm.getObstacleX(i),gm.getObstacleY(i),
+                 gm.getObstacleW(i),gm.getObstacleH(i),
+                 gm.getObstacleType(i));
+  drawPlayer(px, py, pw, ph, anim, onGnd);
+  if (wasmReady) drawWasmParticles();
+  drawJsBursts();
+  if (started) drawProgress(worldX, px);
+
+  // HUD update
+  scoreEl.textContent = score.toString().padStart(6,'0');
+  hiEl.textContent    = hi.toString().padStart(6,'0');
+  speedFill.style.width = Math.min(100,((speed-4.5)/8)*100)+'%';
+
+  if (started && !alive && overlay.classList.contains('hidden'))
+    showDeath(score, hi);
+}
+
+function startLoop() {
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(render);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  OVERLAYS
+// ═══════════════════════════════════════════════════════════
+function showDeath(score, hi) {
+  ovTitle.textContent = 'RUN ENDED';
+  ovTitle.className = 'death';
+  ovTagline.textContent =
+    `You found ${collected.length} of ${repoPickups.length} repositories.`;
+  ovScore.textContent = score.toString().padStart(6,'0');
+  ovRepos.textContent = collected.length;
+  ovSpeedEl.textContent = maxSpeed.toFixed(1)+'x';
+  ovStats.style.display = 'flex';
+  ctaBtn.textContent = 'TRY AGAIN';
+  ctaBtn.disabled = false;
+  overlay.classList.remove('hidden');
+}
+
+function startRun() {
+  if (!wasmReady) return;
+  overlay.classList.add('hidden');
+  collected = []; maxSpeed = 4.5;
+  collCount.textContent = '0';
+  paused = false;
+  buildPickups();
+  gm.startGame();
+}
+
+ctaBtn.addEventListener('click', startRun);
+
+// ═══════════════════════════════════════════════════════════
+//  INPUT
+// ═══════════════════════════════════════════════════════════
+function handleJump() {
+  if (!wasmReady || paused) return;
+  if (!gm.isStarted()) { startRun(); return; }
+  if (!gm.isAlive()) return;
+  gm.jump();
+}
+
+document.addEventListener('keydown', e => {
+  if (['Space','ArrowUp'].includes(e.code) || e.key==='w' || e.key==='W') {
+    e.preventDefault(); handleJump();
+  }
+  if (e.key === 'Escape' && activeCard) closeRepoCard();
+});
+canvas.addEventListener('pointerdown', e => { e.preventDefault(); handleJump(); });
+
+// ═══════════════════════════════════════════════════════════
+//  GITHUB PROMPT
+// ═══════════════════════════════════════════════════════════
+async function submitUsername() {
+  const user = ghInput.value.trim();
+  if (!user) return;
+  const ok = await fetchRepos(user);
+  if (!ok) return;
+  portName.textContent = user.toUpperCase() + ' · WASM';
+  ovNote.textContent = `${allRepos.length} repos loaded — run through them all!`;
+  ovTitle.textContent = 'WASM PORTFOLIO';
+  ovTagline.innerHTML =
+    `A gamified way to explore <strong style="color:var(--acc)">${user}</strong>'s repositories.<br/>Run, jump, and collect every project to read about it.`;
+  ghPrompt.classList.add('hidden');
+  buildPickups();
+  loadWasm();
+}
+
+ghSubmit.addEventListener('click', submitUsername);
+ghInput.addEventListener('keydown', e => { if(e.key==='Enter') submitUsername(); });
+
+const README_URL = 'https://github.com/MikeX-s/cpp-portfolio#readme';
+document.getElementById('readme-link').href = README_URL;
+
+ghInput.focus();
+
+
+</script>
+</body>
+</html>

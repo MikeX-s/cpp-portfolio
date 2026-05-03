@@ -1,4 +1,6 @@
-## GAMEPLAY
+### ```https://mikex-s.github.io/cpp-portfolio/```
+
+## Gameplay
 
 - **SPACE / ↑ / W / tap** — Jump (double-jump supported)
 - Avoid obstacles. Speed increases over time.

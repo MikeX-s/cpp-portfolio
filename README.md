@@ -1,6 +1,15 @@
-### ```https://mikex-s.github.io/cpp-portfolio/```
+```
+game.cpp  ──[em++/embind]──► game.wasm
+                              game.js  (glue loader)
+                                 ▲
+                            index.html
+                         (Canvas 2D renderer
+                          + JS game loop)
+```
 
-## Gameplay
+### Gameplay ▷ https://mikex-s.github.io/cpp-portfolio/
+
+## Steering
 
 - **SPACE / ↑ / W / tap** — Jump (double-jump supported)
 - Avoid obstacles. Speed increases over time.

@@ -1,81 +1,83 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
-# build.sh — Compile game.cpp → game.wasm + game.js (Emscripten glue)
-#
-# Prerequisites:
-#   Install Emscripten SDK:  https://emscripten.org/docs/getting_started/
-#     git clone https://github.com/emscripten-core/emsdk.git
-#     cd emsdk && ./emsdk install latest && ./emsdk activate latest
-#     source ./emsdk_env.sh
-#
-# Usage:
-#   chmod +x build.sh
-#   ./build.sh            # Release build (optimised)
-#   ./build.sh --debug    # Debug build (assertions, source maps)
-# ─────────────────────────────────────────────────────────────────────────────
-
 set -euo pipefail
 
-SRC="game.cpp"
-OUT_JS="game.js"    # Emscripten also writes game.wasm alongside this
-
-# Detect debug flag
 DEBUG=0
-if [[ "${1:-}" == "--debug" ]]; then DEBUG=1; fi
+CLEAN=0
+for arg in "$@"; do
+    case "$arg" in
+        --debug) DEBUG=1 ;;
+        --clean) CLEAN=1 ;;
+        *) echo "✖ Unknown argument: $arg"; exit 1 ;;
+    esac
+done
 
-echo "▶  Building WASM Runner…"
-echo "   Source : $SRC"
-echo "   Output : $OUT_JS + game.wasm"
-echo "   Mode   : $([ $DEBUG -eq 1 ] && echo 'DEBUG' || echo 'RELEASE')"
-echo ""
+BUILD_TYPE="Release"
+BUILD_DIR="build_wasm"
+[[ $DEBUG -eq 1 ]] && BUILD_TYPE="Debug" && BUILD_DIR="build_debug"
 
-# ── Shared flags ──────────────────────────────────────────────────────────────
-COMMON=(
-  "$SRC"
-  -o "$OUT_JS"
-  --bind                        # Emscripten Bindings (embind)
-  -s MODULARIZE=1               # Wrap in a factory function: GameModule()
-  -s EXPORT_NAME="GameModule"   # Must match the call in index.html
-  -s ALLOW_MEMORY_GROWTH=1      # Let the heap grow as needed
-  -s NO_EXIT_RUNTIME=1          # Keep the runtime alive after main() returns
-  -s ENVIRONMENT='web'          # Web-only build (smaller output)
-  -s SINGLE_FILE=0              # Keep .wasm separate (better caching)
-)
+# 1. Emscripten check
+if ! command -v emcmake &> /dev/null; then
+    EMSDK_ENV="${EMSDK_PATH:-$HOME/emsdk}/emsdk_env.sh"
+    if [[ ! -f "$EMSDK_ENV" ]]; then
+        echo "✖ emsdk not found at $EMSDK_ENV. Set EMSDK_PATH or install emsdk."
+        exit 1
+    fi
+    echo "▶ Activating Emscripten..."
+    source "$EMSDK_ENV"
+fi
 
-# ── Release flags ─────────────────────────────────────────────────────────────
-RELEASE_FLAGS=(
-  -O2
-  --closure 1                   # Minify the JS glue
-  -s ASSERTIONS=0
-)
+# 2. Clean
+if [[ $CLEAN -eq 1 && -d "$BUILD_DIR" ]]; then
+    echo "▶ Cleaning $BUILD_DIR..."
+    rm -rf "$BUILD_DIR"
+fi
 
-# ── Debug flags ───────────────────────────────────────────────────────────────
-DEBUG_FLAGS=(
-  -O0
-  -g4                           # Full debug info + source maps
-  -s ASSERTIONS=2               # Runtime checks
-  -s SAFE_HEAP=1
-  --source-map-base ./
-)
+# 3. Configure
+echo "▶ Configuring ($BUILD_TYPE)..."
+emcmake cmake -B "$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
 
-if [[ $DEBUG -eq 1 ]]; then
-  em++ "${COMMON[@]}" "${DEBUG_FLAGS[@]}"
+# 4. Build
+echo "▶ Building..."
+cmake --build "$BUILD_DIR" --target game
+
+# 5. Copy
+cp -f "$BUILD_DIR/game/game.js"   ./docs/game.js
+cp -f "$BUILD_DIR/game/game.wasm" ./docs/game.wasm
+echo "✔ Build complete."
+
+# 6. SRI
+echo "▶ Generating SRI hashes..."
+JS_HASH=$(openssl dgst -sha384 -binary ./docs/game.js   | openssl base64 -A)
+WASM_HASH=$(openssl dgst -sha384 -binary ./docs/game.wasm | openssl base64 -A)
+
+SRI_FILE="$BUILD_DIR/sri-hashes.txt"
+{
+    echo ""
+    echo "  ┌─ game.js   sha384-$JS_HASH"
+    echo "  └─ game.wasm sha384-$WASM_HASH"
+    echo ""
+    echo "  ⚠  Only game.wasm changes with logic edits."
+    echo "     game.js is Emscripten glue — stable across builds."
+    echo ""
+} | tee "$SRI_FILE"
+echo "▶ Hashes saved to $SRI_FILE"
+
+HTML_FILE="docs/index.html"
+if [[ -f "$HTML_FILE" ]]; then
+    sed -i.bak -E \
+        "s|(<script src=\"game\.js\" integrity=\")sha384-[A-Za-z0-9+/=]+|\1sha384-${JS_HASH}|" \
+        "$HTML_FILE"
+    sed -i.bak -E \
+        "s|(wasmHash: ')sha384-[A-Za-z0-9+/=]+|\1sha384-${WASM_HASH}|" \
+        "$HTML_FILE"
+    rm -f "$HTML_FILE.bak"
+    echo "✔ SRI hashes patched into $HTML_FILE"
 else
-  em++ "${COMMON[@]}" "${RELEASE_FLAGS[@]}"
+    echo "⚠ $HTML_FILE not found — skipping SRI patch"
 fi
 
 echo ""
-echo "✔  Build complete!"
-echo "   game.js   — $(du -sh game.js  | cut -f1)  (Emscripten glue + module loader)"
-echo "   game.wasm — $(du -sh game.wasm | cut -f1)  (compiled C++ logic)"
+echo "  game.js   sha384-$JS_HASH"
+echo "  game.wasm sha384-$WASM_HASH"
 echo ""
-echo "─────────────────────────────────────────────────────────────────────────"
-echo "  SERVE LOCALLY (required — browsers block file:// WASM loads):"
-echo "    python3 -m http.server 8080"
-echo "    open http://localhost:8080"
-echo ""
-echo "  GITHUB PAGES DEPLOYMENT:"
-echo "    1. Push index.html, game.js, game.wasm to your repo root (or /docs)."
-echo "    2. In repo Settings → Pages → Source, pick the branch/folder."
-echo "    3. GitHub Pages serves with correct MIME types for .wasm by default."
-echo "─────────────────────────────────────────────────────────────────────────"

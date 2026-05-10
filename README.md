@@ -8,10 +8,10 @@
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `game.cpp` | All game logic: physics, collision, scoring, particles |
-| `index.html` | Canvas renderer, JS game loop, input handling |
+| Folder | Purpose |
+|--------|---------|
+| `game` | All game logic: physics, collision, scoring, particles |
+| `docs/index.html` | Canvas renderer, JS game loop, input handling |
 | `build.sh` | Emscripten compile script (release + debug modes) |
 
 ## Architecture
@@ -21,7 +21,7 @@ The JS/WASM boundary is intentionally minimal and clean:
 **JS → C++ (commands)**
 ```js
 gm.startGame()   // start / restart
-gm.update(dt)    // advance one frame (called from rAF)
+gm.update()    // advance one frame (called from rAF)
 gm.jump()        // player jump input
 ```
 

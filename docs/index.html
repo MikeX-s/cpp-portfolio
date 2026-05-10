@@ -3,6 +3,15 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval';
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src https://fonts.gstatic.com;
+  connect-src 'self' https://api.github.com;
+  img-src 'self' data:;
+  worker-src 'self' blob:;
+"/>
 <title>Interactive WASM Portfolio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -10,6 +19,7 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
+/* ── Single source of truth for palette ── */
 :root {
   --bg:      #05080d;
   --surface: #0b1118;
@@ -30,22 +40,21 @@ html,body{
   background:var(--bg);
   color:var(--text);
   font-family:var(--font-mono);
-  display:flex;flex-direction:column;
-  align-items:center;justify-content:center;
   overflow:hidden;
 }
 
-/* ── Outer shell ── */
 #shell{
   position:relative;
-  width:min(760px,98vw);
+  width:100%;height:100%;
+  display:flex;flex-direction:column;
   border:1px solid var(--border2);
-  border-radius:4px;overflow:hidden;
+  overflow:hidden;
   box-shadow:0 0 0 1px #000,0 0 50px rgba(64,200,240,.08);
 }
 
 /* ── Top bar ── */
 #topbar{
+  flex-shrink:0;
   display:flex;align-items:center;
   padding:0 14px;height:42px;
   background:var(--surface);
@@ -56,20 +65,21 @@ html,body{
   font-family:var(--font-disp);font-size:13px;font-weight:800;
   color:var(--acc);letter-spacing:.16em;text-transform:uppercase;
   white-space:nowrap;text-shadow:0 0 14px var(--acc);
+  min-width:0;overflow:hidden;text-overflow:ellipsis;
 }
-.sep{flex:1}
-.hud-pill{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
+.sep{flex:1;min-width:12px}
+.hud-pill{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1;min-width:0}
 .hud-pill .lbl{font-size:8px;color:var(--muted);letter-spacing:.12em}
 .hud-pill .val{
   font-family:var(--font-disp);font-size:15px;font-weight:800;
   color:var(--acc4);text-shadow:0 0 8px var(--acc4);letter-spacing:.04em;
 }
 #hud-hi .val{color:var(--acc);text-shadow:0 0 8px var(--acc)}
-.hdiv{width:1px;height:22px;background:var(--border2)}
+.hdiv{width:1px;height:22px;background:var(--border2);flex-shrink:0}
 
 #repos-badge{
   display:flex;align-items:center;gap:7px;
-  padding:3px 10px;
+  padding:3px 10px;flex-shrink:0;
   border:1px solid var(--acc4);border-radius:2px;
   font-size:10px;color:var(--acc4);letter-spacing:.08em;
 }
@@ -79,39 +89,77 @@ html,body{
 }
 
 /* ── Speed line ── */
-#speed-line{height:2px;background:var(--surface);overflow:hidden}
+#speed-line{flex-shrink:0;height:2px;background:var(--surface);overflow:hidden}
 #speed-fill{
   height:100%;width:0%;
   background:linear-gradient(90deg,var(--acc4),var(--acc2));
-  transition:width .3s;box-shadow:0 0 6px var(--acc2);
+  box-shadow:0 0 6px var(--acc2);
+  /* No CSS transition — width is updated per-frame and would conflict */
 }
 
-/* ── Canvas ── */
-#canvas{display:block;width:100%;background:var(--bg);image-rendering:pixelated}
+/* ── Canvas: fixed logical resolution scaled by CSS ── */
+#canvas{
+  display:block;
+  flex:1;
+  width:100%;
+  min-height:0;
+  background:var(--bg);
+  image-rendering:auto;
+  object-fit:contain;
+}
 
 /* ── Bottom bar ── */
 #botbar{
+  flex-shrink:0;
   display:flex;align-items:center;justify-content:space-between;
-  padding:0 14px;height:34px;
-  background:var(--surface);border-top:1px solid var(--border2);
-  font-size:10px;color:var(--muted);letter-spacing:.06em;
+  padding:0 18px;height:44px;          /* was 0 14px / 34px */
+  background:var(--surface);
+  border-top:1px solid var(--border2);
+  font-size:13px;                       /* was 10px */
+  color:var(--text);                    /* was --muted — too low contrast */
+  opacity:.85;
+  letter-spacing:.04em;                 /* was .06em — tighter at larger size */
 }
-#botbar .keys{display:flex;gap:12px}
-.key{background:var(--border2);color:var(--text);border-radius:2px;padding:1px 6px;font-size:9px}
-#wasm-pill{display:flex;align-items:center;gap:6px}
+#botbar .keys{
+  display:flex;
+  gap:18px;                             /* was 12px */
+}
+.key{
+  background:var(--border2);
+  color:var(--text);
+  border:1px solid var(--muted);        /* added — gives the keycap visual weight */
+  border-radius:3px;
+  padding:3px 9px;                      /* was 1px 6px */
+  font-size:12px;                       /* was 9px */
+  font-weight:500;
+  letter-spacing:.06em;
+  margin-right:4px;
+}
+#wasm-pill{
+  display:flex;align-items:center;gap:8px;
+  font-size:12px;                       /* matches surrounding scale */
+}
 #wasm-dot{
-  width:7px;height:7px;border-radius:50%;
-  background:var(--acc3);box-shadow:0 0 6px var(--acc3);transition:all .4s;
+  width:9px;height:9px;                 /* was 7px — visible at the new scale */
+  border-radius:50%;
+  background:var(--acc3);
+  box-shadow:0 0 6px var(--acc3);
+  transition:all .4s;
 }
-#wasm-dot.live{background:var(--acc4);box-shadow:0 0 6px var(--acc4)}
 
 /* ── OVERLAY ── */
 #overlay{
   position:absolute;inset:0;z-index:30;
   display:flex;flex-direction:column;
   align-items:center;justify-content:center;
-  background:rgba(5,8,13,.9);backdrop-filter:blur(3px);
+  background:rgba(5,8,13,.95);
   transition:opacity .35s;gap:6px;
+}
+@supports (backdrop-filter: blur(3px)) {
+  #overlay {
+    background:rgba(5,8,13,.9);
+    backdrop-filter:blur(3px);
+  }
 }
 #overlay.hidden{opacity:0;pointer-events:none}
 
@@ -158,69 +206,126 @@ html,body{
 
 /* ── REPO CARD ── */
 #repo-card{
-  position:absolute;left:50%;bottom:0;
-  transform:translateX(-50%) translateY(110%);
-  width:min(500px,94%);
+  position:absolute;
+  top:50%;left:50%;
+  transform:translate(-50%, -50%) scale(0.92);
+  opacity:0;
+  pointer-events:none;
+  width:min(720px, 92%);
   background:var(--surface);
-  border:1px solid var(--acc4);border-bottom:none;
-  border-radius:4px 4px 0 0;
-  padding:20px 22px 18px;z-index:25;
-  box-shadow:0 -8px 50px rgba(64,240,156,.12),0 0 0 1px rgba(64,240,156,.04);
-  transition:transform .45s cubic-bezier(.16,1,.3,1);
+  border:1px solid var(--acc4);
+  border-radius:6px;
+  padding:28px 32px 24px;       /* a bit more breathing room */
+  z-index:25;
+  box-shadow:
+    0 0 0 1px rgba(64,240,156,.04),
+    0 20px 80px rgba(0,0,0,.6),
+    0 0 60px rgba(64,240,156,.15);
+  transition:opacity .35s, transform .45s cubic-bezier(.16,1,.3,1);
 }
-#repo-card.visible{transform:translateX(-50%) translateY(0)}
+#repo-card.visible{
+  transform:translate(-50%, -50%) scale(1);
+  opacity:1;
+  pointer-events:auto;
+}
+
 .rc-header{
   display:flex;align-items:flex-start;justify-content:space-between;
-  margin-bottom:10px;gap:10px;
+  margin-bottom:14px;gap:14px;
 }
 .rc-name{
-  font-family:var(--font-disp);font-size:18px;font-weight:800;
-  color:var(--acc4);text-shadow:0 0 12px rgba(64,240,156,.4);
-  letter-spacing:.04em;word-break:break-all;
+  font-family:var(--font-disp);
+  font-size:24px;               /* was 18px */
+  font-weight:800;
+  color:var(--acc4);
+  text-shadow:0 0 12px rgba(64,240,156,.4);
+  letter-spacing:.04em;
+  word-break:break-all;
 }
 .rc-lang-badge{
-  flex-shrink:0;font-size:9px;letter-spacing:.12em;
-  padding:2px 8px;border-radius:2px;
-  background:rgba(64,200,240,.1);border:1px solid var(--acc2);
-  color:var(--acc2);white-space:nowrap;
+  flex-shrink:0;
+  font-size:11px;               /* was 9px */
+  letter-spacing:.12em;
+  padding:4px 10px;             /* was 2px 8px */
+  border-radius:3px;
+  background:rgba(64,200,240,.1);
+  border:1px solid var(--acc2);
+  color:var(--acc2);
+  white-space:nowrap;
 }
+
 .rc-desc{
-  font-size:12px;color:var(--text);line-height:1.7;
-  margin-bottom:12px;opacity:.9;
+  font-size:14px;               /* was 12px */
+  color:var(--text);            /* was --text with .9 opacity */
+  line-height:1.7;
+  margin-bottom:16px;
+  opacity:1;                    /* was .9 — full contrast for readability */
 }
+
 .rc-meta{
-  display:flex;gap:16px;flex-wrap:wrap;
-  font-size:10px;color:var(--muted);letter-spacing:.06em;margin-bottom:14px;
+  display:flex;gap:20px;flex-wrap:wrap;
+  font-size:12px;               /* was 10px */
+  color:var(--text);            /* was --muted — much more readable */
+  opacity:.75;                  /* still a little subdued, but legible */
+  letter-spacing:.04em;
+  margin-bottom:18px;
 }
-.rc-meta .icon{color:var(--acc);font-size:11px}
-.rc-actions{display:flex;gap:10px;align-items:center}
+.rc-meta .icon{
+  color:var(--acc);
+  font-size:13px;               /* was 11px */
+  margin-right:4px;
+}
+
+.rc-actions{display:flex;gap:12px;align-items:center}
 .rc-btn-primary{
-  flex:1;padding:9px;
-  font-family:var(--font-disp);font-size:11px;font-weight:800;
-  letter-spacing:.14em;text-transform:uppercase;
+  flex:1;
+  padding:12px;                 /* was 9px */
+  font-family:var(--font-disp);
+  font-size:13px;               /* was 11px */
+  font-weight:800;
+  letter-spacing:.14em;
+  text-transform:uppercase;
   background:var(--acc4);color:var(--bg);
-  border:none;border-radius:2px;cursor:pointer;
-  text-decoration:none;display:flex;align-items:center;justify-content:center;
-  box-shadow:0 0 14px rgba(64,240,156,.3);transition:box-shadow .15s;
+  border:none;border-radius:3px;
+  cursor:pointer;
+  text-decoration:none;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 14px rgba(64,240,156,.3);
+  transition:box-shadow .15s;
 }
-.rc-btn-primary:hover{box-shadow:0 0 24px rgba(64,240,156,.5)}
 .rc-btn-secondary{
-  padding:9px 16px;font-size:11px;letter-spacing:.1em;
-  background:transparent;color:var(--muted);
-  border:1px solid var(--border2);border-radius:2px;
-  cursor:pointer;font-family:var(--font-mono);
-  transition:color .15s,border-color .15s;
+  padding:12px 20px;            /* was 9px 16px */
+  font-size:13px;               /* was 11px */
+  letter-spacing:.1em;
+  background:transparent;
+  color:var(--text);            /* was --muted — more readable */
+  opacity:.8;
+  border:1px solid var(--border2);
+  border-radius:3px;
+  cursor:pointer;
+  font-family:var(--font-mono);
+  transition:color .15s,border-color .15s,opacity .15s;
 }
-.rc-btn-secondary:hover{color:var(--text);border-color:var(--muted)}
+.rc-btn-secondary:hover{
+  color:var(--text);
+  opacity:1;
+  border-color:var(--muted);
+}
+
 .rc-collected-bar{
-  margin-top:14px;padding-top:12px;
+  margin-top:18px;
+  padding-top:14px;
   border-top:1px solid var(--border);
-  display:flex;gap:6px;flex-wrap:wrap;min-height:20px;
+  display:flex;gap:8px;flex-wrap:wrap;
+  min-height:24px;
 }
 .rc-chip{
-  font-size:9px;color:var(--acc4);
-  border:1px solid rgba(64,240,156,.3);
-  padding:2px 7px;border-radius:2px;letter-spacing:.06em;
+  font-size:11px;               /* was 9px */
+  color:var(--acc4);
+  border:1px solid rgba(64,240,156,.4);
+  padding:3px 9px;              /* was 2px 7px */
+  border-radius:3px;
+  letter-spacing:.04em;         /* was .06em — slightly looser for small text */
 }
 
 /* ── GitHub prompt ── */
@@ -262,7 +367,7 @@ html,body{
 
 /* ── Scanlines ── */
 #scanlines{
-  position:absolute;inset:0;pointer-events:none;z-index:50;border-radius:4px;
+  position:absolute;inset:0;pointer-events:none;z-index:50;
   background:repeating-linear-gradient(
     to bottom,transparent 0px,transparent 3px,rgba(0,0,0,.09) 3px,rgba(0,0,0,.09) 4px
   );
@@ -271,55 +376,70 @@ html,body{
 @keyframes flicker{
   0%,100%{opacity:1}93%{opacity:1}94%{opacity:.5}95%{opacity:1}97%{opacity:.7}98%{opacity:1}
 }
+
+/* ── Reduced motion accessibility ── */
+@media (prefers-reduced-motion: reduce) {
+  #ov-title         { animation: none; }
+  #scanlines        { display: none; }
+  #wasm-dot         { transition: none; }
+  #overlay          { transition: none; }
+  #gh-prompt        { transition: none; }
+  #cta-btn          { transition: none; }
+  #repo-card        { transition: none; }
+  .rc-btn-primary,
+  .rc-btn-secondary { transition: none; }
+}
 </style>
 </head>
 <body>
 
-<!-- GitHub username gate -->
-<div id="gh-prompt">
-  <h2>WASM PORTFOLIO</h2>
-  <p>Enter your GitHub username to load your repositories as in-game collectibles.</p>
-  <div id="gh-form">
-    <input id="gh-input" value="MikeX-s" placeholder="MikeX-s" autocomplete="off" spellcheck="false"/>
-    <button id="gh-submit">LOAD</button>
-  </div>
-  <div id="gh-err">Could not fetch repos — check the username.</div>
-  <div id="gh-loading">Fetching repositories…</div>
-  <div class="gh-demo">see <a id="readme-link" target="_blank" rel="noopener noreferrer">README</a></div>
-</div>
-
 <div id="shell">
-  <div id="scanlines"></div>
+  <div id="scanlines" aria-hidden="true"></div>
+
+  <!-- GitHub username gate — inside #shell so inset:0 is relative to shell -->
+  <div id="gh-prompt">
+    <h2>WASM PORTFOLIO</h2>
+    <p>Enter your GitHub username to load your repositories as in-game collectibles.</p>
+    <div id="gh-form">
+      <input type="text" id="gh-input" value="MikeX-s" placeholder="MikeX-s"
+             autocomplete="username" spellcheck="false" maxlength="39"/>
+      <button type="button" id="gh-submit">LOAD</button>
+    </div>
+    <div id="gh-err" role="alert"></div>
+    <div id="gh-loading" role="status">Fetching repositories…</div>
+    <div class="gh-demo">see <a id="readme-link" target="_blank" rel="noopener noreferrer">README</a></div>
+  </div>
 
   <div id="topbar">
     <span class="brand" id="portfolio-name">WASM PORTFOLIO</span>
     <div class="sep"></div>
-    <div id="repos-badge"><div class="dot"></div><span id="collected-count">0</span>&nbsp;REPOS</div>
-    <div class="hdiv"></div>
+    <div id="repos-badge"><div class="dot" aria-hidden="true"></div><span id="collected-count">0</span>&nbsp;REPOS</div>
+    <div class="hdiv" aria-hidden="true"></div>
     <div class="hud-pill" id="hud-hi"><div class="lbl">HI-SCORE</div><div class="val" id="hi-val">000000</div></div>
-    <div class="hdiv"></div>
+    <div class="hdiv" aria-hidden="true"></div>
     <div class="hud-pill"><div class="lbl">SCORE</div><div class="val" id="score-val">000000</div></div>
   </div>
   <div id="speed-line"><div id="speed-fill"></div></div>
 
-  <canvas id="canvas" width="760" height="340"></canvas>
+  <canvas id="canvas" role="img"
+          aria-label="Endless runner game showing player jumping over obstacles to collect repository cards"></canvas>
 
   <!-- Repo info card (slides up from bottom) -->
-  <div id="repo-card">
+  <div id="repo-card" aria-hidden="true">
     <div class="rc-header">
       <div class="rc-name" id="rc-name">repo-name</div>
       <div class="rc-lang-badge" id="rc-lang">C++</div>
     </div>
     <div class="rc-desc" id="rc-desc">Description.</div>
     <div class="rc-meta">
-      <span><span class="icon">★</span><span id="rc-stars">0</span></span>
-      <span><span class="icon">⑂</span><span id="rc-forks">0</span></span>
-      <span><span class="icon">◉</span><span id="rc-issues">0</span></span>
+      <span><span class="icon" aria-hidden="true">★</span><span id="rc-stars">0</span></span>
+      <span><span class="icon" aria-hidden="true">⑂</span><span id="rc-forks">0</span></span>
+      <span><span class="icon" aria-hidden="true">◉</span><span id="rc-issues">0</span></span>
       <span id="rc-updated"></span>
     </div>
     <div class="rc-actions">
-      <a id="rc-link" href="#" target="_blank" rel="noopener" class="rc-btn-primary">VIEW ON GITHUB →</a>
-      <button class="rc-btn-secondary" id="rc-continue">CONTINUE RUN ▶</button>
+      <a id="rc-link" href="#" target="_blank" rel="noopener noreferrer" class="rc-btn-primary">VIEW ON GITHUB →</a>
+      <button type="button" class="rc-btn-secondary" id="rc-continue">CONTINUE RUN ▶</button>
     </div>
     <div class="rc-collected-bar" id="rc-chips"></div>
   </div>
@@ -337,7 +457,7 @@ html,body{
       <div class="ov-stat"><div class="sv" id="ov-repos">0</div><div class="sk">REPOS FOUND</div></div>
       <div class="ov-stat"><div class="sv" id="ov-speed">0x</div><div class="sk">MAX SPEED</div></div>
     </div>
-    <button id="cta-btn" disabled>LOADING…</button>
+    <button type="button" id="cta-btn" disabled>LOADING…</button>
     <div class="ov-note" id="ov-note">SPACE · ↑ · TAP — jump &nbsp;|&nbsp; DOUBLE JUMP supported</div>
   </div>
 
@@ -347,30 +467,84 @@ html,body{
       <span><span class="key">↑ / W</span> jump</span>
       <span><span class="key">TAP</span> jump</span>
     </div>
-    <div id="wasm-pill"><div id="wasm-dot"></div><span id="wasm-txt">WASM LOADING</span></div>
+    <div id="wasm-pill"><div id="wasm-dot" aria-hidden="true"></div><span id="wasm-txt">WASM LOADING</span></div>
   </div>
 </div>
 
-<script src="game.js" integrity="sha384-REPLACE_WITH_GAME_JS_HASH" crossorigin="anonymous"></script>
+<script src="game.js" integrity="sha384-GnKb3OBuiRhfzVn9fYkNb+fGP+QNKa+Q6IkwNfbv/P5Ld07nsjG/oOzTBqTXoz6B" crossorigin="anonymous"></script>
 <script>
 'use strict';
 
 // ═══════════════════════════════════════════════════════════
-//  SRI CONFIG — update hashes after every build
-//  Generate: openssl dgst -sha384 -binary <file> | openssl base64 -A
+//  SRI CONFIG
 // ═══════════════════════════════════════════════════════════
 const SRI = {
-  wasmHash: 'sha384-REPLACE_WITH_GAME_WASM_HASH',
+  wasmHash: 'sha384-IjOeRsdNvBBqaevScH8ncsMcj3ddUe1Se87Ox9qaSK9H6ylbG9Q2d+s/IHJBsCKz',
 };
 
 // ═══════════════════════════════════════════════════════════
-//  CONFIG
+//  CONFIG — must match C++ WorldCfg / Layout / Physics
 // ═══════════════════════════════════════════════════════════
 const CFG = {
-  maxRepos: 20,
-  repoSpacing: 950,    // px between repo collectibles
-  firstRepoAt: 550,    // first one appears after this world distance
+  maxRepos:        20,
+  repoSpacing:     950,
+  firstRepoAt:     550,
+  groundTileWidth: 600,    // matches WorldCfg::GroundTileWidth
+  pickupCollectL:  -40,
+  pickupCollectR:  70,
+  // Logical (WASM) canvas resolution — must match what the C++ side assumes
+  logicalW:        760,
+  logicalH:        340,
 };
+
+// ═══════════════════════════════════════════════════════════
+//  VFX TUNABLES
+// ═══════════════════════════════════════════════════════════
+const VFX = {
+  starCount:           90,
+  starFieldHeightFrac: 0.74,
+  starSpeedRef:        4.5,    // matches Physics::BaseSpeed
+  speedReference:      4.5,
+  speedMaxDelta:       8,
+  pickupCardW:         40,
+  pickupCardH:         56,
+  pickupBobAmplitude:  5,
+  particleGravity:     0.15,
+  jsBurstCount:        22,
+};
+
+const OBSTACLE_LABELS = ['BLOCK', 'LOW', 'HIGH'];
+
+// ═══════════════════════════════════════════════════════════
+//  PALETTE — read from CSS variables (single source of truth)
+// ═══════════════════════════════════════════════════════════
+const _css = getComputedStyle(document.documentElement);
+const _v   = name => {
+  const value = _css.getPropertyValue(name).trim();
+  if (!value) console.warn(`[Palette] CSS variable ${name} not loaded`);
+  return value;
+};
+const C = {
+  bg:      _v('--bg'),
+  surface: _v('--surface'),
+  border:  _v('--border'),
+  border2: _v('--border2'),
+  acc:     _v('--acc'),
+  acc2:    _v('--acc2'),
+  acc3:    _v('--acc3'),
+  acc4:    _v('--acc4'),
+  text:    _v('--text'),
+  muted:   _v('--muted'),
+  obs:     ['#f04070', '#ffc840', '#a040f0'],
+};
+
+const LANG_COL = {
+  'C++':'#40c8f0','C':'#3498db','Rust':'#f04070','Go':'#40f09c',
+  'Python':'#f0c040','JavaScript':'#f0d040','TypeScript':'#40b8f0',
+  'Java':'#f08040','Kotlin':'#a040f0','Swift':'#f05030',
+  'HTML':'#f04070','CSS':'#4080f0','Shell':'#40f09c',
+};
+const lc = lang => LANG_COL[lang] || '#8888aa';
 
 // ═══════════════════════════════════════════════════════════
 //  DOM REFS
@@ -411,6 +585,23 @@ const ghErr     = document.getElementById('gh-err');
 const ghLoading = document.getElementById('gh-loading');
 
 // ═══════════════════════════════════════════════════════════
+//  CANVAS — fixed logical resolution, scaled by CSS to fit window.
+//  DPR is handled so it stays sharp on retina displays.
+// ═══════════════════════════════════════════════════════════
+const CW = CFG.logicalW;
+const CH = CFG.logicalH;
+
+function configureCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = CW * dpr;
+  canvas.height = CH * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+
+window.addEventListener('resize', configureCanvas);
+
+// ═══════════════════════════════════════════════════════════
 //  RUNTIME STATE
 // ═══════════════════════════════════════════════════════════
 let gm         = null;
@@ -420,64 +611,62 @@ let paused     = false;
 let allRepos   = [];
 let repoPickups= [];
 let collected  = [];
-let maxSpeed   = 4.5;
+let maxSpeed   = VFX.speedReference;
 let activeCard = null;
 let frame      = 0;
 let jsBursts   = [];
 
-const CW = 760, CH = 340;
+// HUD memoization — skip DOM writes when value unchanged
+let lastScore    = -1;
+let lastHi       = -1;
+let lastSpeedPct = -1;
 
 // ═══════════════════════════════════════════════════════════
-//  PALETTE
+//  STAR FIELD
 // ═══════════════════════════════════════════════════════════
-const C = {
-  bg:'#05080d', surface:'#0b1118', border:'#162030', border2:'#1e3448',
-  acc:'#f0c040', acc2:'#40c8f0', acc3:'#f04070', acc4:'#40f09c',
-  text:'#d4e8f4', muted:'#3a5570',
-  obs:['#f04070','#ffc840','#a040f0'],
-};
-
-const LANG_COL = {
-  'C++':'#40c8f0','C':'#3498db','Rust':'#f04070','Go':'#40f09c',
-  'Python':'#f0c040','JavaScript':'#f0d040','TypeScript':'#40b8f0',
-  'Java':'#f08040','Kotlin':'#a040f0','Swift':'#f05030',
-  'HTML':'#f04070','CSS':'#4080f0','Shell':'#40f09c',
-};
-const lc = lang => LANG_COL[lang] || '#8888aa';
-
-// Parallax star field
-const STARS = Array.from({length:90}, () => ({
-  x:Math.random()*CW, y:Math.random()*(CH*.74),
-  r:Math.random()*1.3+.3, spd:Math.random()*.7+.15,
-  a:Math.random()*.55+.15,
+const STARS = Array.from({length: VFX.starCount}, () => ({
+  x:   Math.random() * CW,
+  y:   Math.random() * (CH * VFX.starFieldHeightFrac),
+  r:   Math.random() * 1.3 + 0.3,
+  spd: Math.random() * 0.7 + 0.15,
+  a:   Math.random() * 0.55 + 0.15,
 }));
 
 // ═══════════════════════════════════════════════════════════
 //  GITHUB API
 // ═══════════════════════════════════════════════════════════
 async function fetchRepos(username) {
-  ghErr.style.display = 'none';
+  // Clear stale UI state from previous attempts
+  ghErr.style.display     = 'none';
+  ghErr.textContent       = '';
   ghLoading.style.display = 'block';
-  ghSubmit.disabled = true;
+  ghSubmit.disabled       = true;
   try {
     const res = await fetch(
       `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated&per_page=100`
     );
-    if (!res.ok) throw new Error(res.status);
+    if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
     const data = await res.json();
-    if (!Array.isArray(data) || data.message) throw new Error('bad response');
+    if (!Array.isArray(data) || data.message) throw new Error('Unexpected response format');
     allRepos = data
       .filter(r => !r.fork)
       .sort((a, b) => b.stargazers_count - a.stargazers_count)
       .slice(0, CFG.maxRepos);
-    if (allRepos.length === 0) throw new Error('no public repos');
+    if (allRepos.length === 0) throw new Error('No public repositories found');
     return true;
   } catch (e) {
+    const msg =
+      e.message === 'No public repositories found'        ? 'No public repositories found.'
+      : e.message?.startsWith('GitHub returned 404')      ? 'User not found on GitHub.'
+      : e.message?.startsWith('GitHub returned 403')      ? 'GitHub rate limit hit — try again in a few minutes.'
+      : 'Could not fetch repos — check the username and your connection.';
+    ghErr.textContent   = msg;
     ghErr.style.display = 'block';
+    console.error('[GitHub]', e);
     return false;
   } finally {
     ghLoading.style.display = 'none';
-    ghSubmit.disabled = false;
+    ghSubmit.disabled       = false;
   }
 }
 
@@ -487,11 +676,10 @@ async function fetchRepos(username) {
 async function verifyWasmIntegrity(buffer, expectedHash) {
   try {
     const [algorithm] = expectedHash.split('-');
-    const algoName = algorithm.replace('sha', 'SHA-').toUpperCase();
-    const hashBuffer = await crypto.subtle.digest(algoName, buffer);
-    const hashArray  = Array.from(new Uint8Array(hashBuffer));
-    const hashBase64 = btoa(String.fromCharCode(...hashArray));
-    const actual     = algorithm + '-' + hashBase64;
+    const algoName    = algorithm.replace('sha', 'SHA-').toUpperCase();
+    const hashBuffer  = await crypto.subtle.digest(algoName, buffer);
+    const hashBase64  = btoa(String.fromCharCode(...new Uint8Array(hashBuffer)));
+    const actual      = algorithm + '-' + hashBase64;
     if (actual !== expectedHash) {
       throw new Error(`[SRI] Hash mismatch!\n  expected: ${expectedHash}\n  actual:   ${actual}`);
     }
@@ -505,8 +693,13 @@ async function verifyWasmIntegrity(buffer, expectedHash) {
 
 async function loadWasm() {
   if (typeof GameModule === 'undefined') {
-    wasmTxt.textContent = 'WASM NOT FOUND';
-    console.error('[WASM] game.js not found — make sure game.js and game.wasm are deployed.');
+    wasmTxt.textContent = 'WASM UNAVAILABLE';
+    console.error(
+      '[WASM] GameModule is undefined. Possible causes:\n' +
+      '  1. game.js failed to load (network/404)\n' +
+      '  2. game.js was blocked by SRI integrity mismatch — update the hash in index.html\n' +
+      '  3. game.js was blocked by CSP — check the script-src directive'
+    );
     return;
   }
 
@@ -521,7 +714,7 @@ async function loadWasm() {
       if (!SRI.wasmHash.includes('REPLACE_WITH')) {
         const ok = await verifyWasmIntegrity(buffer, SRI.wasmHash);
         if (!ok) {
-          wasmTxt.textContent = 'WASM TAMPERED';
+          wasmTxt.textContent      = 'WASM TAMPERED';
           wasmDot.style.background = 'var(--acc3)';
           throw new Error('[SRI] Integrity check failed — refusing to run tampered Wasm.');
         }
@@ -541,7 +734,31 @@ async function loadWasm() {
     .then(m => {
       WebAssembly.instantiateStreaming = _origInstantiateStreaming;
       WebAssembly.instantiate         = _origInstantiate;
-      gm = m; onWasmReady();
+      gm = m;
+
+      // Verify required bindings exist
+      const required = ['isStarted','isAlive','update','getGroundY','getPlayerX',
+                        'getPlayerY','getPlayerW','getPlayerH','getAnimTimer',
+                        'isOnGround','getScrollSpeed','getScore','getHiScore',
+                        'getObstacleCount','getObstacleX','getObstacleY','getObstacleW',
+                        'getObstacleH','getObstacleType','getParticleCount','getParticleX',
+                        'getParticleY','getParticleLife','getParticleR','getParticleG',
+                        'getParticleB','getGroundTile','startGame','jump'];
+      const missing = required.filter(name => typeof gm[name] !== 'function');
+      if (missing.length) {
+        console.error('[WASM] missing bindings:', missing);
+        wasmTxt.textContent = 'WASM INCOMPLETE';
+        return;
+      }
+      // getWorldX is optional — fall back to internal counter if absent
+      if (typeof gm.getWorldX !== 'function') {
+        console.warn('[WASM] getWorldX binding missing — using JS-side counter fallback');
+        let _wx = 0;
+        const _origUpdate = gm.update.bind(gm);
+        gm.update    = () => { _origUpdate(); _wx += gm.getScrollSpeed(); };
+        gm.getWorldX = () => _wx;
+      }
+      onWasmReady();
     })
     .catch(err => {
       WebAssembly.instantiateStreaming = _origInstantiateStreaming;
@@ -555,8 +772,8 @@ function onWasmReady() {
   wasmReady = true;
   wasmDot.classList.add('live');
   wasmTxt.textContent = 'WASM READY';
-  ctaBtn.disabled = false;
-  ctaBtn.textContent = 'START RUN';
+  ctaBtn.disabled     = false;
+  ctaBtn.textContent  = 'START RUN';
   startLoop();
 }
 
@@ -565,16 +782,13 @@ function onWasmReady() {
 // ═══════════════════════════════════════════════════════════
 function buildPickups() {
   repoPickups = allRepos.map((repo, i) => ({
-    worldX: CFG.firstRepoAt + i * CFG.repoSpacing,
+    worldX:    CFG.firstRepoAt + i * CFG.repoSpacing,
     repo,
     collected: false,
-    phase: Math.random() * Math.PI * 2,
+    phase:     Math.random() * Math.PI * 2,
   }));
 }
 
-// ═══════════════════════════════════════════════════════════
-//  PICKUP COLLISION CHECK (called each frame)
-// ═══════════════════════════════════════════════════════════
 function checkPickups() {
   if (!gm.isStarted() || !gm.isAlive() || paused) return;
   const wx = gm.getWorldX();
@@ -583,7 +797,7 @@ function checkPickups() {
   for (const p of repoPickups) {
     if (p.collected) continue;
     const sx = p.worldX - wx + px;
-    if (sx > -40 && sx < 70) {
+    if (sx > CFG.pickupCollectL && sx < CFG.pickupCollectR) {
       p.collected = true;
       collected.push(p.repo);
       collCount.textContent = collected.length;
@@ -594,18 +808,15 @@ function checkPickups() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  JS BURST PARTICLES (pickup effect — purely in JS)
-// ═══════════════════════════════════════════════════════════
 function spawnBurst(x, y) {
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < VFX.jsBurstCount; i++) {
     jsBursts.push({
       x, y,
-      vx: (Math.random() - .5) * 7,
-      vy: (Math.random() - .5) * 7 - 2,
+      vx:   (Math.random() - 0.5) * 7,
+      vy:   (Math.random() - 0.5) * 7 - 2,
       life: 30 + Math.random() * 20,
-      ml: 50,
-      hue: 140 + Math.random() * 40,
+      ml:   50,
+      hue:  140 + Math.random() * 40,
     });
   }
 }
@@ -613,45 +824,71 @@ function spawnBurst(x, y) {
 // ═══════════════════════════════════════════════════════════
 //  REPO CARD
 // ═══════════════════════════════════════════════════════════
+function isSafeRepoUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && u.hostname === 'github.com';
+  } catch {
+    return false;
+  }
+}
+
 function showRepoCard(repo) {
-  paused = true;
+  if (activeCard) return;   // guard against concurrent triggers
+  paused     = true;
   activeCard = repo;
 
   const col = lc(repo.language);
-  rcName.textContent = repo.name;
-  rcLang.textContent = repo.language || 'N/A';
+  rcName.textContent       = repo.name;
+  rcLang.textContent       = repo.language || 'N/A';
   rcLang.style.borderColor = col;
-  rcLang.style.color = col;
-  rcDesc.textContent = repo.description || 'No description provided.';
-  rcStars.textContent = repo.stargazers_count;
-  rcForks.textContent = repo.forks_count;
-  rcIssues.textContent = repo.open_issues_count;
+  rcLang.style.color       = col;
+  rcDesc.textContent       = repo.description || 'No description provided.';
+  rcStars.textContent      = repo.stargazers_count;
+  rcForks.textContent      = repo.forks_count;
+  rcIssues.textContent     = repo.open_issues_count;
   const d = new Date(repo.updated_at);
-  rcUpdated.textContent = `Updated ${d.toLocaleDateString('en',{month:'short',year:'numeric'})}`;
-  rcLink.href = repo.html_url;
+  rcUpdated.textContent    = `Updated ${d.toLocaleDateString('en',{month:'short',year:'numeric'})}`;
 
-  // Previously collected chips
-  rcChips.innerHTML = '';
+  // Validate URL protocol/host before assigning to href
+  if (isSafeRepoUrl(repo.html_url)) {
+    rcLink.href = repo.html_url;
+  } else {
+    console.warn('[Security] Suspicious repo URL rejected:', repo.html_url);
+    rcLink.href = '#';
+    rcLink.removeAttribute('target');
+  }
+
+  // Build chip list with safe DOM construction
+  rcChips.replaceChildren();
   if (collected.length > 1) {
     const lbl = document.createElement('span');
     lbl.style.cssText = 'font-size:9px;color:var(--muted);letter-spacing:.1em;width:100%;margin-bottom:4px;';
     lbl.textContent = 'ALSO COLLECTED:';
     rcChips.appendChild(lbl);
     collected.slice(0, -1).slice(-8).forEach(r => {
-      const c = document.createElement('span');
-      c.className = 'rc-chip';
-      c.textContent = r.name;
-      rcChips.appendChild(c);
+      const chip = document.createElement('span');
+      chip.className   = 'rc-chip';
+      chip.textContent = r.name;
+      rcChips.appendChild(chip);
     });
   }
 
   repoCard.classList.add('visible');
+  repoCard.setAttribute('aria-hidden', 'false');
 }
 
 function closeRepoCard() {
   repoCard.classList.remove('visible');
+  repoCard.setAttribute('aria-hidden', 'true');
   activeCard = null;
-  setTimeout(() => { paused = false; }, 460);
+  // Filter on propertyName — transitionend fires for each animated property
+  const handler = (e) => {
+    if (e.propertyName !== 'transform') return;
+    paused = false;
+    repoCard.removeEventListener('transitionend', handler);
+  };
+  repoCard.addEventListener('transitionend', handler);
 }
 
 rcContinue.addEventListener('click', closeRepoCard);
@@ -660,7 +897,6 @@ rcContinue.addEventListener('click', closeRepoCard);
 //  DRAW HELPERS
 // ═══════════════════════════════════════════════════════════
 function rr(ctx, x, y, w, h, r) {
-  // rounded rect path
   const tl = typeof r === 'number' ? r : (r.tl||0);
   const tr = typeof r === 'number' ? r : (r.tr||0);
   const br = typeof r === 'number' ? r : (r.br||0);
@@ -676,9 +912,9 @@ function rr(ctx, x, y, w, h, r) {
 
 function drawStars(speed) {
   for (const s of STARS) {
-    if (!paused) { s.x -= s.spd * (speed / 4.5); if (s.x < 0) s.x = CW; }
+    if (!paused) { s.x -= s.spd * (speed / VFX.starSpeedRef); if (s.x < 0) s.x = CW; }
     ctx.globalAlpha = s.a;
-    ctx.fillStyle = C.text;
+    ctx.fillStyle   = C.text;
     ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
   }
   ctx.globalAlpha = 1;
@@ -686,92 +922,85 @@ function drawStars(speed) {
 
 function drawGround(groundY) {
   const GH = CH - groundY;
-  ctx.fillStyle = C.surface; ctx.fillRect(0, groundY, CW, GH);
+  ctx.fillStyle   = C.surface; ctx.fillRect(0, groundY, CW, GH);
   ctx.strokeStyle = C.acc2; ctx.lineWidth = 1.5;
   ctx.shadowColor = C.acc2; ctx.shadowBlur = 10;
-  ctx.beginPath(); ctx.moveTo(0,groundY); ctx.lineTo(CW,groundY); ctx.stroke();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = C.border2; ctx.lineWidth = .5;
+  ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(CW, groundY); ctx.stroke();
+  ctx.shadowColor = 'transparent';
+
+  ctx.strokeStyle = C.border2; ctx.lineWidth = 0.5;
   for (let i = 0; i < 3; i++) {
     const tx = gm.getGroundTile(i);
     for (let row = 1; row <= 2; row++) {
       ctx.beginPath();
-      ctx.moveTo(Math.max(0,tx), groundY + row*(GH/3));
-      ctx.lineTo(Math.min(CW,tx+780), groundY + row*(GH/3));
+      ctx.moveTo(Math.max(0, tx), groundY + row * (GH / 3));
+      ctx.lineTo(Math.min(CW, tx + CFG.groundTileWidth + 180), groundY + row * (GH / 3));
       ctx.stroke();
     }
     if (tx > 0 && tx < CW) {
-      ctx.beginPath(); ctx.moveTo(tx,groundY); ctx.lineTo(tx,CH); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(tx, groundY); ctx.lineTo(tx, CH); ctx.stroke();
     }
   }
 }
 
 function drawObstacle(x, y, w, h, type) {
   const col = C.obs[type] || C.acc3;
-  ctx.fillStyle = col + '20'; ctx.fillRect(x,y,w,h);
+  ctx.fillStyle   = col + '20'; ctx.fillRect(x, y, w, h);
   ctx.strokeStyle = col; ctx.lineWidth = 1.5;
   ctx.shadowColor = col; ctx.shadowBlur = 10;
-  ctx.strokeRect(x,y,w,h); ctx.shadowBlur = 0;
-  ctx.fillStyle = col;
-  ctx.font = '8px "Syne Mono",monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText(['BLOCK','LOW','HIGH'][type]||'?', x+w/2, y+h/2+3);
-  ctx.textAlign = 'left';
+  ctx.strokeRect(x, y, w, h);
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle   = col;
+  ctx.font        = '8px "Syne Mono",monospace';
+  ctx.textAlign   = 'center';
+  ctx.fillText(OBSTACLE_LABELS[type] || '?', x + w/2, y + h/2 + 3);
+  ctx.textAlign   = 'left';
 }
 
-// Floating repo collectible icon
 function drawPickups(groundY, worldX, playerX) {
-  const IH = 56;
+  const IH = VFX.pickupCardH;
+  const IW = VFX.pickupCardW;
   for (const p of repoPickups) {
     if (p.collected) continue;
     const sx = p.worldX - worldX + playerX;
     if (sx < -90 || sx > CW + 90) continue;
 
-    const bob = groundY - IH - 8 + Math.sin(frame*.055 + p.phase) * 5;
+    const bob = groundY - IH - 8 + Math.sin(frame * 0.055 + p.phase) * VFX.pickupBobAmplitude;
     const col = lc(p.repo.language);
 
-    // Vertical glow column to ground
-    const grd = ctx.createLinearGradient(sx+20, groundY-IH-24, sx+20, groundY);
-    grd.addColorStop(0, 'rgba(64,240,156,0)');
+    const grd = ctx.createLinearGradient(sx + 20, groundY - IH - 24, sx + 20, groundY);
+    grd.addColorStop(0,  'rgba(64,240,156,0)');
     grd.addColorStop(.5, 'rgba(64,240,156,.07)');
-    grd.addColorStop(1, 'rgba(64,240,156,.02)');
+    grd.addColorStop(1,  'rgba(64,240,156,.02)');
     ctx.fillStyle = grd;
-    ctx.fillRect(sx+4, groundY-IH-24, 32, IH+24);
+    ctx.fillRect(sx + 4, groundY - IH - 24, 32, IH + 24);
 
-    // Card shadow
     ctx.shadowColor = C.acc4; ctx.shadowBlur = 16;
-
-    // Card body
-    ctx.fillStyle = C.surface; rr(ctx,sx,bob,40,IH,3); ctx.fill();
+    ctx.fillStyle   = C.surface; rr(ctx, sx, bob, IW, IH, 3); ctx.fill();
     ctx.strokeStyle = C.acc4; ctx.lineWidth = 1.2;
-    rr(ctx,sx,bob,40,IH,3); ctx.stroke();
-    ctx.shadowBlur = 0;
+    rr(ctx, sx, bob, IW, IH, 3); ctx.stroke();
+    ctx.shadowColor = 'transparent';
 
-    // Language colour bar on top
     ctx.fillStyle = col;
-    rr(ctx,sx,bob,40,7,{tl:3,tr:3,bl:0,br:0}); ctx.fill();
+    rr(ctx, sx, bob, IW, 7, {tl:3,tr:3,bl:0,br:0}); ctx.fill();
 
-    // Repo initial (large)
-    ctx.fillStyle = C.acc4;
-    ctx.font = 'bold 17px "Syne",sans-serif';
-    ctx.textAlign = 'center';
+    ctx.fillStyle   = C.acc4;
+    ctx.font        = 'bold 17px "Syne",sans-serif';
+    ctx.textAlign   = 'center';
     ctx.shadowColor = C.acc4; ctx.shadowBlur = 8;
-    ctx.fillText(p.repo.name[0].toUpperCase(), sx+20, bob+32);
-    ctx.shadowBlur = 0;
+    ctx.fillText(p.repo.name[0].toUpperCase(), sx + 20, bob + 32);
+    ctx.shadowColor = 'transparent';
 
-    // Stars count
     ctx.fillStyle = C.acc;
-    ctx.font = '8px "Syne Mono",monospace';
-    ctx.fillText(`★${p.repo.stargazers_count}`, sx+20, bob+46);
-    ctx.textAlign = 'left';
+    ctx.font      = '8px "Syne Mono",monospace';
+    ctx.fillText(`★${p.repo.stargazers_count}`, sx + 20, bob + 46);
 
-    // "COLLECT" label above card
-    ctx.globalAlpha = .65 + Math.sin(frame*.08+p.phase)*.35;
-    ctx.fillStyle = C.acc4;
-    ctx.font = '7px "Syne Mono",monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('COLLECT', sx+20, bob-7);
-    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+    ctx.globalAlpha = 0.65 + Math.sin(frame * 0.08 + p.phase) * 0.35;
+    ctx.fillStyle   = C.acc4;
+    ctx.font        = '7px "Syne Mono",monospace';
+    ctx.fillText('COLLECT', sx + 20, bob - 7);
+    ctx.globalAlpha = 1;
+    ctx.textAlign   = 'left';
   }
 }
 
@@ -779,69 +1008,71 @@ function drawPlayer(px, py, pw, ph, anim, onGround) {
   const cx = px + pw/2;
   if (onGround) {
     ctx.fillStyle = 'rgba(64,200,240,.08)';
-    ctx.beginPath(); ctx.ellipse(cx, py+ph+2, pw*.7, 4, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx, py + ph + 2, pw * 0.7, 4, 0, 0, Math.PI*2); ctx.fill();
   }
   ctx.shadowColor = C.acc2; ctx.shadowBlur = 22;
-  ctx.fillStyle = C.acc2+'bb'; ctx.fillRect(px+6, py+10, pw-12, ph-18);
-  ctx.fillStyle = C.acc2;
-  ctx.beginPath(); ctx.arc(cx, py+8, 8, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = C.bg;
-  ctx.beginPath(); ctx.arc(cx+3, py+7, 2.5, 0, Math.PI*2); ctx.fill();
-  const ls = Math.sin(anim*Math.PI*2)*6;
+  ctx.fillStyle   = C.acc2 + 'bb'; ctx.fillRect(px + 6, py + 10, pw - 12, ph - 18);
+  ctx.fillStyle   = C.acc2;
+  ctx.beginPath(); ctx.arc(cx, py + 8, 8, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle   = C.bg;
+  ctx.beginPath(); ctx.arc(cx + 3, py + 7, 2.5, 0, Math.PI*2); ctx.fill();
+  const ls = Math.sin(anim * Math.PI * 2) * 6;
   ctx.strokeStyle = C.acc2; ctx.lineWidth = 3; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(cx-5,py+ph-8); ctx.lineTo(cx-5+ls,py+ph); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx+5,py+ph-8); ctx.lineTo(cx+5-ls,py+ph); ctx.stroke();
-  ctx.shadowBlur = 0;
+  ctx.beginPath(); ctx.moveTo(cx - 5, py + ph - 8); ctx.lineTo(cx - 5 + ls, py + ph); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx + 5, py + ph - 8); ctx.lineTo(cx + 5 - ls, py + ph); ctx.stroke();
+  ctx.shadowColor = 'transparent';
 }
 
 function drawWasmParticles() {
   const n = gm.getParticleCount();
   for (let i = 0; i < n; i++) {
     const life = gm.getParticleLife(i);
-    const r=gm.getParticleR(i),g=gm.getParticleG(i),b=gm.getParticleB(i);
+    const r = gm.getParticleR(i), g = gm.getParticleG(i), b = gm.getParticleB(i);
     ctx.globalAlpha = life;
-    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillStyle   = `rgb(${r},${g},${b})`;
     ctx.shadowColor = `rgb(${r},${g},${b})`; ctx.shadowBlur = 8;
-    const sz = 3*life+1;
-    ctx.fillRect(gm.getParticleX(i)-sz/2, gm.getParticleY(i)-sz/2, sz, sz);
+    const sz = 3 * life + 1;
+    ctx.fillRect(gm.getParticleX(i) - sz/2, gm.getParticleY(i) - sz/2, sz, sz);
   }
-  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  ctx.shadowColor = 'transparent';
 }
 
 function drawJsBursts() {
   for (const p of jsBursts) {
-    ctx.globalAlpha = p.life/p.ml;
-    ctx.fillStyle = `hsl(${p.hue},80%,65%)`;
+    ctx.globalAlpha = p.life / p.ml;
+    ctx.fillStyle   = `hsl(${p.hue},80%,65%)`;
     ctx.shadowColor = `hsl(${p.hue},80%,65%)`; ctx.shadowBlur = 6;
-    ctx.fillRect(p.x-2, p.y-2, 4, 4);
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
   }
-  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
-  jsBursts.forEach(p => { p.x+=p.vx; p.y+=p.vy; p.vy+=.15; p.life--; });
+  ctx.globalAlpha = 1;
+  ctx.shadowColor = 'transparent';
+  jsBursts.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += VFX.particleGravity; p.life--; });
   jsBursts = jsBursts.filter(p => p.life > 0);
 }
 
-function drawProgress(worldX, px) {
+function drawProgress(worldX) {
   const total = repoPickups.length;
   const left  = repoPickups.filter(p => !p.collected && p.worldX > worldX).length;
 
-  ctx.font = '8px "Syne Mono",monospace';
+  ctx.font      = '8px "Syne Mono",monospace';
   ctx.textAlign = 'right';
   ctx.fillStyle = C.muted;
-  ctx.fillText(`${collected.length}/${total} repos`, CW-12, 18);
+  ctx.fillText(`${collected.length}/${total} repos`, CW - 12, 18);
 
   if (total > 0 && left === 0) {
-    ctx.fillStyle = C.acc4; ctx.globalAlpha = .8;
-    ctx.font = 'bold 10px "Syne",sans-serif';
-    ctx.fillText('ALL REPOS COLLECTED!', CW-12, 32);
+    ctx.fillStyle   = C.acc4; ctx.globalAlpha = 0.8;
+    ctx.font        = 'bold 10px "Syne",sans-serif';
+    ctx.fillText('ALL REPOS COLLECTED!', CW - 12, 32);
     ctx.globalAlpha = 1;
   } else {
     const next = repoPickups.find(p => !p.collected && p.worldX > worldX);
     if (next) {
       const dist = Math.max(0, Math.floor((next.worldX - worldX) / 10));
       if (dist < 250) {
-        ctx.globalAlpha = .55 + Math.sin(frame*.1)*.45;
-        ctx.fillStyle = C.acc4;
-        ctx.fillText(`▶ ${next.repo.name} in ${dist}m`, CW-12, 32);
+        ctx.globalAlpha = 0.55 + Math.sin(frame * 0.1) * 0.45;
+        ctx.fillStyle   = C.acc4;
+        ctx.fillText(`▶ ${next.repo.name} in ${dist}m`, CW - 12, 32);
         ctx.globalAlpha = 1;
       }
     }
@@ -852,7 +1083,7 @@ function drawProgress(worldX, px) {
 // ═══════════════════════════════════════════════════════════
 //  MAIN LOOP
 // ═══════════════════════════════════════════════════════════
-function render(ts) {
+function render() {
   rafId = requestAnimationFrame(render);
   frame++;
 
@@ -862,46 +1093,56 @@ function render(ts) {
   if (started && alive && !paused) gm.update();
   if (started && alive) checkPickups();
 
-  const groundY = wasmReady ? gm.getGroundY() : 300;
-  const px      = wasmReady ? gm.getPlayerX() : 120;
-  const py      = wasmReady ? gm.getPlayerY() : groundY-40;
-  const pw      = wasmReady ? gm.getPlayerW() : 32;
-  const ph      = wasmReady ? gm.getPlayerH() : 40;
-  const anim    = wasmReady ? gm.getAnimTimer() : 0;
-  const onGnd   = wasmReady ? gm.isOnGround() : true;
-  const speed   = wasmReady ? gm.getScrollSpeed() : 4.5;
-  const score   = wasmReady ? gm.getScore() : 0;
-  const hi      = wasmReady ? gm.getHiScore() : 0;
-  const worldX  = wasmReady ? gm.getWorldX() : 0;
+  // Batch all WASM getter calls — each crosses the JS/WASM boundary
+  const groundY = wasmReady ? gm.getGroundY()       : 300;
+  const px      = wasmReady ? gm.getPlayerX()       : 120;
+  const py      = wasmReady ? gm.getPlayerY()       : groundY - 40;
+  const pw      = wasmReady ? gm.getPlayerW()       : 32;
+  const ph      = wasmReady ? gm.getPlayerH()       : 40;
+  const anim    = wasmReady ? gm.getAnimTimer()     : 0;
+  const onGnd   = wasmReady ? gm.isOnGround()       : true;
+  const speed   = wasmReady ? gm.getScrollSpeed()   : VFX.speedReference;
+  const score   = wasmReady ? gm.getScore()         : 0;
+  const hi      = wasmReady ? gm.getHiScore()       : 0;
+  const worldX  = wasmReady ? gm.getWorldX()        : 0;
   const nObs    = wasmReady ? gm.getObstacleCount() : 0;
 
   if (speed > maxSpeed) maxSpeed = speed;
 
-  // Clear
-  ctx.clearRect(0,0,CW,CH);
-  ctx.fillStyle = C.bg; ctx.fillRect(0,0,CW,CH);
+  ctx.clearRect(0, 0, CW, CH);
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, CW, CH);
 
-  // Sky gradient
-  const sky = ctx.createLinearGradient(0,0,0,groundY);
-  sky.addColorStop(0,'#04060b'); sky.addColorStop(1,'#0b1a26');
-  ctx.fillStyle = sky; ctx.fillRect(0,0,CW,groundY);
+  const sky = ctx.createLinearGradient(0, 0, 0, groundY);
+  sky.addColorStop(0, '#04060b'); sky.addColorStop(1, '#0b1a26');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, CW, groundY);
 
   drawStars(started ? speed : 2);
   if (wasmReady) drawGround(groundY);
   if (started) drawPickups(groundY, worldX, px);
   for (let i = 0; i < nObs; i++)
-    drawObstacle(gm.getObstacleX(i),gm.getObstacleY(i),
-                 gm.getObstacleW(i),gm.getObstacleH(i),
-                 gm.getObstacleType(i));
+    drawObstacle(
+      gm.getObstacleX(i), gm.getObstacleY(i),
+      gm.getObstacleW(i), gm.getObstacleH(i),
+      gm.getObstacleType(i));
   drawPlayer(px, py, pw, ph, anim, onGnd);
   if (wasmReady) drawWasmParticles();
   drawJsBursts();
-  if (started) drawProgress(worldX, px);
+  if (started) drawProgress(worldX);
 
-  // HUD update
-  scoreEl.textContent = score.toString().padStart(6,'0');
-  hiEl.textContent    = hi.toString().padStart(6,'0');
-  speedFill.style.width = Math.min(100,((speed-4.5)/8)*100)+'%';
+  // HUD updates — only write to DOM when the value actually changed
+  if (score !== lastScore) {
+    scoreEl.textContent = score.toString().padStart(6, '0');
+    lastScore = score;
+  }
+  if (hi !== lastHi) {
+    hiEl.textContent = hi.toString().padStart(6, '0');
+    lastHi = hi;
+  }
+  const speedPct = Math.min(100, ((speed - VFX.speedReference) / VFX.speedMaxDelta) * 100);
+  if (Math.abs(speedPct - lastSpeedPct) > 1) {
+    speedFill.style.width = speedPct + '%';
+    lastSpeedPct = speedPct;
+  }
 
   if (started && !alive && overlay.classList.contains('hidden'))
     showDeath(score, hi);
@@ -916,23 +1157,22 @@ function startLoop() {
 //  OVERLAYS
 // ═══════════════════════════════════════════════════════════
 function showDeath(score, hi) {
-  ovTitle.textContent = 'RUN ENDED';
-  ovTitle.className = 'death';
-  ovTagline.textContent =
-    `You found ${collected.length} of ${repoPickups.length} repositories.`;
-  ovScore.textContent = score.toString().padStart(6,'0');
-  ovRepos.textContent = collected.length;
-  ovSpeedEl.textContent = maxSpeed.toFixed(1)+'x';
+  ovTitle.textContent   = 'RUN ENDED';
+  ovTitle.className     = 'death';
+  ovTagline.textContent = `You found ${collected.length} of ${repoPickups.length} repositories.`;
+  ovScore.textContent   = score.toString().padStart(6, '0');
+  ovRepos.textContent   = collected.length;
+  ovSpeedEl.textContent = maxSpeed.toFixed(1) + 'x';
   ovStats.style.display = 'flex';
-  ctaBtn.textContent = 'TRY AGAIN';
-  ctaBtn.disabled = false;
+  ctaBtn.textContent    = 'TRY AGAIN';
+  ctaBtn.disabled       = false;
   overlay.classList.remove('hidden');
 }
 
 function startRun() {
   if (!wasmReady) return;
   overlay.classList.add('hidden');
-  collected = []; maxSpeed = 4.5;
+  collected = []; maxSpeed = VFX.speedReference;
   collCount.textContent = '0';
   paused = false;
   buildPickups();
@@ -952,7 +1192,7 @@ function handleJump() {
 }
 
 document.addEventListener('keydown', e => {
-  if (['Space','ArrowUp'].includes(e.code) || e.key==='w' || e.key==='W') {
+  if (['Space','ArrowUp'].includes(e.code) || e.key === 'w' || e.key === 'W') {
     e.preventDefault(); handleJump();
   }
   if (e.key === 'Escape' && activeCard) closeRepoCard();
@@ -967,25 +1207,34 @@ async function submitUsername() {
   if (!user) return;
   const ok = await fetchRepos(user);
   if (!ok) return;
+
   portName.textContent = user.toUpperCase() + ' · WASM';
-  ovNote.textContent = `${allRepos.length} repos loaded — run through them all!`;
-  ovTitle.textContent = 'WASM PORTFOLIO';
-  ovTagline.innerHTML =
-    `A gamified way to explore <strong style="color:var(--acc)">${user}</strong>'s repositories.<br/>Run, jump, and collect every project to read about it.`;
+  ovNote.textContent   = `${allRepos.length} repos loaded — run through them all!`;
+  ovTitle.textContent  = 'WASM PORTFOLIO';
+
+  // Build tagline with safe DOM construction — no innerHTML with user input
+  ovTagline.replaceChildren();
+  const strong = document.createElement('strong');
+  strong.style.color = 'var(--acc)';
+  strong.textContent = user;
+  ovTagline.append('A gamified way to explore ', strong, "'s repositories.");
+  ovTagline.append(document.createElement('br'));
+  ovTagline.append('Run, jump, and collect every project to read about it.');
+
   ghPrompt.classList.add('hidden');
   buildPickups();
   loadWasm();
 }
 
 ghSubmit.addEventListener('click', submitUsername);
-ghInput.addEventListener('keydown', e => { if(e.key==='Enter') submitUsername(); });
+ghInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitUsername(); });
 
 const README_URL = 'https://github.com/MikeX-s/cpp-portfolio#readme';
 document.getElementById('readme-link').href = README_URL;
 
+// Initialise canvas backing store before the first render frame
+configureCanvas();
 ghInput.focus();
-
-
 </script>
 </body>
 </html>
